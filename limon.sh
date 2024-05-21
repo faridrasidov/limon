@@ -5,25 +5,17 @@
 
 __structure() {
     # Colors
-    COLOR_RESET='\[\033[m\]'                         # No Color
-    COLOR_AQUA=${COLOR_AQUA:-'\[\033[1;36m\]'}       # Aqua
-    COLOR_YELLOW=${COLOR_YELLOW:-'\[\033[1;33m\]'}   # Yellow
-    COLOR_GREEN=${COLOR_GREEN:-'\[\033[1;32m\]'}     # Green
-    COLOR_RED=${COLOR_RED:-'\[\033[1;31m\]'}         # Red
+    COLOR_RESET='\[\033[m\]'                   # No Color
+    COLOR_OK=${COLOR_OK:-'\[\033[1;36m\]'}     # Aqua
+    COLOR_ERR=${COLOR_ERR:-'\[\033[1;31m\]'}   # Red
+    COLOR_GIT=${COLOR_GIT:-'\[\033[1;33m\]'}   # Yellow
+    COLOR_HOST=${COLOR_HOST:-'\[\033[1;32m\]'} # Green
 
     # Symbols
     SYMBOL_GIT_BRANCH=${SYMBOL_GIT_BRANCH:-''}
     SYMBOL_GIT_MODIFIED=${SYMBOL_GIT_MODIFIED:-'● '}
     SYMBOL_GIT_PUSH=${SYMBOL_GIT_PUSH:-↑}
     SYMBOL_GIT_PULL=${SYMBOL_GIT_PULL:-↓}
-
-    if [[ -z "$PS_SYMBOL" ]]; then
-      case "$(uname)" in
-          Farid)    PS_SYMBOL='★';;
-          Linux)    PS_SYMBOL='$';;
-          *)        PS_SYMBOL='%';;
-      esac
-    fi
 
     __git_info() {
         [[ $structure_GIT = 0 ]] && return   # Disabled By You.
@@ -61,34 +53,45 @@ __structure() {
 
     General() {
         # Check Last Exit Code And Display Red if ERR or Aqua OK
-        if [ $? -eq 0 ]; then
-            local symbol="$COLOR_AQUA$PS_SYMBOL $COLOR_RESET"
+        if [ $LAST_EXIT_CODE -eq 0 ]; then
+            Zymbol=$COLOR_OK
         else
-            local symbol="$COLOR_RED$PS_SYMBOL $COLOR_RESET"
+            Zymbol=$COLOR_ERR
+        fi
+                                                                                                                                                                                         # Check User status if superuser "#" else "$"
+        if [ "$(id -u)" -eq 0 ]; then
+            Zymbol="$Zymbol# $COLOR_RESET"
+        else
+            Zymbol="$Zymbol$ $COLOR_RESET"
         fi
 
         # If Path Is In '/root' Or '/home' Color Aqua and When it's in another '/' Folder, Red.
         if [[ "$PWD" != /root* && "$PWD" != /home* && "$PWD" == /* ]]; then
-            local Good=$COLOR_GREEN'\u@\h:'$COLOR_RED'\w'
-            local symbol="$COLOR_RED$PS_SYMBOL $COLOR_RESET"
+            local HostName=$COLOR_HOST'\u@\h:'$COLOR_ERR'\w'$COLOR_RESET
+            #local Zymbol="$COLOR_ERR$userpriv $COLOR_RESET"
         else
-	          local Good=$COLOR_GREEN'\u@\h:'$COLOR_AQUA'\w'
+            local HostName=$COLOR_HOST'\u@\h:'$COLOR_OK'\w'$COLOR_RESET
         fi
 
         # Getting Git Info
         if shopt -q promptvars; then
             __structure_git_info="$(__git_info)"
-            local git="$COLOR_YELLOW\${__structure_git_info}$COLOR_RESET"
+            local git="$COLOR_GIT\${__structure_git_info}$COLOR_RESET"
         else
-            local git="$COLOR_YELLOW$(__git_info)$COLOR_RESET"
+            local git="$COLOR_GIT$(__git_info)$COLOR_RESET"
         fi
 
         # All In One
-        PS1="$Good$git$symbol"
+        PS1="$HostName$git$Zymbol"
     }
 
-    PROMPT_COMMAND="General${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+    CaptureExitCode() {
+        LAST_EXIT_CODE=$?
+    }
+
+    PROMPT_COMMAND="CaptureExitCode; General${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 }
 
 __structure
-unset __structure
+#unset __structure
+

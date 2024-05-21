@@ -1,10 +1,10 @@
-## LinuxTheme
+## limon
 
 Bash script Theme For Your Terminal.
 
 **Features**
 
-![LinuxTheme](https://raw.github.com/FaridRasidov/LinuxTheme/master/example.png)
+![limon](https://raw.github.com/FaridRasidov/limon/master/example.png)
 
 
 - If Path Is In '/root' Or '/home' Color Aqua and When it's in another '/*' Folder, Red.
@@ -20,26 +20,23 @@ Bash script Theme For Your Terminal.
 
 **Download the File**
 ```
-curl https://raw.githubusercontent.com/FaridRasidov/LinuxTheme/master/LinuxTheme.sh > ~/linuxtheme.sh
+curl https://raw.githubusercontent.com/FaridRasidov/limon/master/limon.sh > ~/limon.sh
 ```
 **Enable For Current User**
 ```
-chmod +x ~/linuxtheme.sh
-```
-```
-echo 'source ~/linuxtheme.sh' >> ~/.profile
+echo 'source ~/limon.sh' >> ~/.bashrc
 ```
 
 **Enable For Global**
 ```
-sudo mv ~/linuxtheme.sh /etc/profile.d/ ; sudo chmod +x /etc/profile.d/linuxtheme.sh
+sudo mv ~/limon.sh /root/
 ```
 ```
-sudo source /etc/profile.d/linuxtheme.sh
+echo 'source /root/limon.sh' >> /etc/bash.bashrc
 ```
 
 
-**Why LinuxTheme**?
+**Why limon**?
 
 This script written in bash, which faster than Python. Yes, Python scripts are much easier to write and maintain than
 Bash scripts, but invoking Python interpreter introduces noticeable delay to output. 
