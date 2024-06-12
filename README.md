@@ -1,20 +1,21 @@
-## limon
+**limon**
 
-Bash script Theme For Your Terminal.
+limon is shell script to color bash prompt
 
 **Features**
 
 ![limon](https://raw.github.com/FaridRasidov/limon/master/example.png)
 
 
-- If Path Is In '/root' Or '/home' Color Aqua and When it's in another '/*' Folder, Red.
-- Checks Last Exit Code And Displays Red if ERR or Aqua OK.
-* Shows Git Branch Name.
-* When There Is Uncommitted Changes Shows "●".
-* If There Is Commits Not Uploaded To Remote Shows "↑" And Number Of Commits.
-* If There Is Commits Not Downloaded From Remote Shows "↓" And Number Of Commits.
-- Use Bash builtin when possible to reduce delay. Delay sucks!
-- No Need For Patched Fonts.
+- <i>If Path Is In '/root' Or '/home' Color Aqua and When it's in another '/*' Folder, Red.</i>
+- <i>Checks Last Exit Code And Displays Red if ERR or Aqua OK.</i>
+- <i>Shows (venv) If venv was Activated.</i>
+* <i>Shows Git Branch Name.</i>
+* <i>When There Is Uncommitted Changes Shows "(@)".</i>
+* <i>If There Is Commits Not Uploaded To Remote Shows "↑" And Number Of Commits.</i>
+* <i>If There Is Commits Not Downloaded From Remote Shows "↓" And Number Of Commits.</i>
+- <i>Use Bash builtin when possible to reduce delay. Delay sucks!</i>
+- <i>No Need For Patched Fonts.</i>
 
 **Setup Steps :**
 
@@ -34,7 +35,6 @@ sudo mv ~/limon.sh /root/
 ```
 echo 'source /root/limon.sh' >> /etc/bash.bashrc
 ```
-
 
 **Why limon**?
 
