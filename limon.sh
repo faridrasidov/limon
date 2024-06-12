@@ -5,17 +5,17 @@
 
 __structure() {
     # Colors
-    COLOR_RESET='\[\033[m\]'                   # No Color
-    COLOR_OK=${COLOR_OK:-'\[\033[1;36m\]'}     # Aqua
-    COLOR_ERR=${COLOR_ERR:-'\[\033[1;31m\]'}   # Red
-    COLOR_GIT=${COLOR_GIT:-'\[\033[1;33m\]'}   # Yellow
-    COLOR_HOST=${COLOR_HOST:-'\[\033[1;32m\]'} # Green
+    COLOR_RESET='\[\033[m\]'     # No Color
+    COLOR_OK='\[\033[1;36m\]'    # Aqua
+    COLOR_ERR='\[\033[1;31m\]'   # Red
+    COLOR_GIT='\[\033[1;33m\]'   # Yellow
+    COLOR_HOST='\[\033[1;32m\]'  # Green
 
     # Symbols
-    SYMBOL_GIT_BRANCH=${SYMBOL_GIT_BRANCH:-''}
-    SYMBOL_GIT_MODIFIED=${SYMBOL_GIT_MODIFIED:-'● '}
-    SYMBOL_GIT_PUSH=${SYMBOL_GIT_PUSH:-↑}
-    SYMBOL_GIT_PULL=${SYMBOL_GIT_PULL:-↓}
+    SYMBOL_GIT_BRANCH=''
+    SYMBOL_GIT_MODIFIED=' (@)'
+    SYMBOL_GIT_PUSH='↑'
+    SYMBOL_GIT_PULL='↓'
 
     __git_info() {
         [[ $structure_GIT = 0 ]] && return   # Disabled By You.
@@ -24,7 +24,7 @@ __structure() {
         local ref=$($git_eng symbolic-ref --short HEAD 2>/dev/null)          # Get Current Branch Name.
 
         if [[ -n "$ref" ]]; then
-            ref=$SYMBOL_GIT_BRANCH$ref       # Put Branch Symbol
+            ref=$ref       # Put Branch Symbol
         else
             ref=$($git_eng describe --tags --always 2>/dev/null)    # get tag name or short unique hash.
         fi
@@ -45,10 +45,10 @@ __structure() {
         done < <($git_eng status --porcelain --branch 2>/dev/null)
 
         # Print The Git Branch Status
-        # '●' change after last commit
-        # '↑ ' Not Committed To Remote
-        # '↓ ' Not Synced With Remote
-        printf " $marks$ref"
+        # \'●\' change after last commit
+        # \'↑\' Not Committed To Remote
+        # \'↓\' Not Synced With Remote
+        printf "$marks [$ref]"
     }
 
     General() {
@@ -58,7 +58,7 @@ __structure() {
         else
             Zymbol=$COLOR_ERR
         fi
-                                                                                                                                                                                         # Check User status if superuser "#" else "$"
+        # Check User status if superuser "#" else "$"
         if [ "$(id -u)" -eq 0 ]; then
             Zymbol="$Zymbol# $COLOR_RESET"
         else
@@ -73,6 +73,13 @@ __structure() {
             local HostName=$COLOR_HOST'\u@\h:'$COLOR_OK'\w'$COLOR_RESET
         fi
 
+	# Getting venv Info
+        if [[ -z "$VIRTUAL_ENV" ]]; then
+            local Vena=''
+        else
+            local Vena=$COLOR_RESET'(venv)'$COLOR_RESET
+        fi
+
         # Getting Git Info
         if shopt -q promptvars; then
             __structure_git_info="$(__git_info)"
@@ -82,7 +89,7 @@ __structure() {
         fi
 
         # All In One
-        PS1="$HostName$git$Zymbol"
+        PS1="$Vena$HostName$git$Zymbol"
     }
 
     CaptureExitCode() {
