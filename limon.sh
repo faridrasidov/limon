@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 
-# Uncomment to disable git info
-# structure_GIT=0
+# Save the original PS1 and PROMPT_COMMAND
+if [ -z "${DEFAULT_PS1}" ]; then
+    DEFAULT_PS1="${PS1}"
+    export DEFAULT_PS1
+fi
 
+# Set DEFAULT_PROMPT_COMMAND to empty string if PROMPT_COMMAND is not set
+if [ -z "${PROMPT_COMMAND}" ]; then
+    DEFAULT_PROMPT_COMMAND="${PROMPT_COMMAND}"
+else
+    DEFAULT_PROMPT_COMMAND=""
+fi
+export DEFAULT_PROMPT_COMMAND
+
+# Function to define the prompt structure
 __structure() {
     # Colors
     COLOR_RESET='\[\033[m\]'     # No Color
@@ -45,9 +57,6 @@ __structure() {
         done < <($git_eng status --porcelain --branch 2>/dev/null)
 
         # Print The Git Branch Status
-        # \'●\' change after last commit
-        # \'↑\' Not Committed To Remote
-        # \'↓\' Not Synced With Remote
         printf "$marks [$ref]"
     }
 
@@ -68,12 +77,11 @@ __structure() {
         # If Path Is In '/root' Or '/home' Color Aqua and When it's in another '/' Folder, Red.
         if [[ "$PWD" != /root* && "$PWD" != /home* && "$PWD" == /* ]]; then
             local HostName=$COLOR_HOST'\u@\h:'$COLOR_ERR'\w'$COLOR_RESET
-            #local Zymbol="$COLOR_ERR$userpriv $COLOR_RESET"
         else
             local HostName=$COLOR_HOST'\u@\h:'$COLOR_OK'\w'$COLOR_RESET
         fi
 
-	# Getting venv Info
+        # Getting venv Info
         if [[ -z "$VIRTUAL_ENV" ]]; then
             local Vena=''
         else
@@ -89,16 +97,82 @@ __structure() {
         fi
 
         # All In One
-        PS1="$Vena$HostName$git$Zymbol"
+        export PS1="$Vena$HostName$git$Zymbol"
     }
 
     CaptureExitCode() {
         LAST_EXIT_CODE=$?
     }
 
-    PROMPT_COMMAND="CaptureExitCode; General${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+    # Update PROMPT_COMMAND
+    PROMPT_COMMAND="CaptureExitCode; General${DEFAULT_PROMPT_COMMAND:+; $DEFAULT_PROMPT_COMMAND}"
 }
 
-__structure
-#unset __structure
+# Function to enable the structure
+structure_on() {
+    structure_GIT=1
+    __structure
+    echo "Structure enabled"
+}
 
+structure_on_silent() {
+    structure_GIT=1
+    __structure
+}
+
+# Function to disable the structure
+structure_off() {
+    structure_GIT=0
+    export PS1="$DEFAULT_PS1"
+    PROMPT_COMMAND="$DEFAULT_PROMPT_COMMAND"
+    echo "Structure disabled"
+}
+
+structure_off_silent() {
+    structure_GIT=0
+    export PS1="$DEFAULT_PS1"
+    PROMPT_COMMAND="$DEFAULT_PROMPT_COMMAND"
+}
+
+# Function to set the structure to default
+structure_set_default() {
+    structure_GIT=1
+    echo "Structure set to default"
+}
+
+# Main logic to handle input arguments
+case "$1" in
+    on) 
+	if [[ "$2" == "s" ]]; then
+	    structure_on_silent
+	else
+	    structure_on
+	fi
+        ;;
+    off)
+        if [[ "$2" == "s" ]]; then
+            structure_off_silent
+        else
+            structure_off
+        fi
+        ;;
+    set)
+        if [[ "$2" == "default" ]]; then
+            structure_set_default
+        else
+            echo "Unknown option: $2"
+        fi
+        ;;
+    help)
+        echo "
+limon is the bash color Prompt
+
+Usage:
+	on [s]: turn on the limon
+	off [s]: turn off them limon and restore system PS1
+	help : help to use command
+
+	adding [s] option to on/off indicated the silent mode
+"
+        ;;
+esac

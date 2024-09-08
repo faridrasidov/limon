@@ -20,21 +20,36 @@ limon is shell script to color bash prompt
 **Setup Steps :**
 
 **Download the File**
-```
+```shell
 curl https://raw.githubusercontent.com/FaridRasidov/limon/master/limon.sh > ~/limon.sh
+
+sudo mv ~/limon.sh /usr/bin/
+
+sudo echo 'alias limon="source /usr/bin/limon.sh"' >> /etc/bash.bashrc
 ```
 **Enable For Current User**
-```
-echo 'source ~/limon.sh' >> ~/.bashrc
+```shell
+echo 'limon on s' >> ~/.bashrc
 ```
 
 **Enable For Global**
+```shell
+echo 'limon on s' >> /etc/bash.bashrc
 ```
-sudo mv ~/limon.sh /root/
+
+**Help**
+
+```shell
+limon is the bash color Prompt
+
+Usage:
+	on [s]: turn on the limon
+	off [s]: turn off them limon and restore system PS1
+	help : help to use command
+	
+	adding [s] option to on/off indicated the silent mode
 ```
-```
-echo 'source /root/limon.sh' >> /etc/bash.bashrc
-```
+
 
 **Why limon**?
 
