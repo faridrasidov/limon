@@ -40,7 +40,7 @@ source ~/.bashrc
 **Enable For Global**
 ```shell
 sudo echo 'limon on' >> /etc/bash.bashrc
-sudo source ~/.bashrc
+sudo source /etc/bash.bashrc
 ```
 
 **Change Theme**
