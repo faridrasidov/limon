@@ -1,3 +1,5 @@
+
+
 **limon**
 
 limon is shell script to color bash prompt
@@ -7,34 +9,47 @@ limon is shell script to color bash prompt
 ![limon](https://raw.github.com/FaridRasidov/limon/master/example.png)
 
 
-- <i>If Path Is In '/root' Or '/home' Color Aqua and When it's in another '/*' Folder, Red.</i>
-- <i>Checks Last Exit Code And Displays Red if ERR or Aqua OK.</i>
-- <i>Shows (venv) If venv was Activated.</i>
-* <i>Shows Git Branch Name.</i>
-* <i>When There Is Uncommitted Changes Shows "(@)".</i>
-* <i>If There Is Commits Not Uploaded To Remote Shows "↑" And Number Of Commits.</i>
-* <i>If There Is Commits Not Downloaded From Remote Shows "↓" And Number Of Commits.</i>
-- <i>Use Bash builtin when possible to reduce delay. Delay sucks!</i>
-- <i>No Need For Patched Fonts.</i>
+- <i>if path is  '/root' or '/home' colors aqua and when it's in another '/*' dir red</i>
+- <i>checks last exit code and displays red if any errors happend</i>
+- <i>shows (venv) if some virtual env is activated</i>
+* <i>shows git branch name</i>
+* <i>if there's Uncommitted Changes Shows "(@)"</i>
+* <i>if there's commits not uploaded to remote shows "↑" and number of commits</i>
+* <i>if there's commits not downloaded from remote shows "↓" and number of commits</i>
+- <i>use bash builtin when possible to reduce delay "delay sucks!"</i>
+- <i>now you can select theme from available themes</i>
+- <i>no need for patched fonts</i>
 
 **Setup Steps :**
 
 **Download the File**
 ```shell
-curl https://raw.githubusercontent.com/FaridRasidov/limon/master/limon.sh > ~/limon.sh
+git clone https://github.com/faridrasidov/limon
 
-sudo mv ~/limon.sh /usr/bin/
+sudo mv limon/ /usr/share/
 
-sudo echo 'alias limon="source /usr/bin/limon.sh"' >> /etc/bash.bashrc
+sudo echo 'alias limon="source /usr/share/limon/limon.sh"' >> /etc/bash.bashrc
+sudo echo 'source /usr/share/limon/hint-limon.sh' >> /etc/bash.bashrc
 ```
 **Enable For Current User**
 ```shell
-echo 'limon on s' >> ~/.bashrc
+echo 'limon on' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 **Enable For Global**
 ```shell
-echo 'limon on s' >> /etc/bash.bashrc
+sudo echo 'limon on' >> /etc/bash.bashrc
+sudo source ~/.bashrc
+```
+
+**Change Theme**
+```shell
+limon on -s default
+```
+or
+```shell
+limon on -s git_bash
 ```
 
 **Help**
@@ -43,11 +58,11 @@ echo 'limon on s' >> /etc/bash.bashrc
 limon is the bash color Prompt
 
 Usage:
-	on [s]: turn on the limon
-	off [s]: turn off them limon and restore system PS1
+	on [-s] <theme_name>: turn on the limon
+	off [-s]: turn off the limon and restore system PS1
 	help : help to use command
 	
-	adding [s] option to on/off indicated the silent mode
+	adding '-s' option to on/off indicated the silent mode
 ```
 
 
