@@ -5,7 +5,7 @@ exit_code() {
 	LAST_EXIT_CODE=$?
 }
 
-#get subcommmand and shift 
+# get subcommmand and shift 
 SUBCOMMAND="$1"
 shift
 
@@ -86,7 +86,8 @@ main() {
 	local c_purple='\[\033[1;35m\]'
 	local c_cyan='\[\033[1;36m\]'
 	local c_white='\[\033[1;37m\]'
-	
+	local c_gray='\[\033[1;90m\]'
+
 	# define git symbols
 	local sym_git_branch=''
     	local sym_git_modified=' (@)'
@@ -175,7 +176,7 @@ main() {
         	else
             		local the_venv_info=$color_reset'(venv) '
         	fi
-		printf "%s" "$the_venv_info"
+		printf "$the_venv_info"
 	}
 	
 	# func to color host & user section
@@ -186,13 +187,35 @@ main() {
 	
 	#func to color dir section
 	color_dir() {
-		# If Path Is In '/root' Or '/home' Color Aqua and When it's in another '/' Folder, Red.
-        	
-		if [[ "$PWD" != /root* && "$PWD" != /home* && "$PWD" == /* ]]; then
-            		local the_dir_info=$lim_color_err'\w'$color_reset
-        	else
-            		local the_dir_info=$lim_color_dir'\w'$color_reset
-        	fi
+        	dir_owner_uid=$(stat -c '%u' . 2> /dev/null)
+
+		current_uid=$(id -u 2> /dev/null)
+
+		local dir_flag
+		if [ "$dir_owner_uid" -eq "$current_uid" ] 2>/dev/null; then
+    			local dir_flag=1		
+		else
+    			local dir_flag=0
+		fi
+
+		if [ "$current_uid" -eq 0 ]; then
+			# for root user 
+			# if path '/root*' or '/home*', color normal for other '/' subdirs, red
+			if [[ "$PWD" != /root* && "$PWD" != /home* && "$PWD" == /* ]]; then
+            			local the_dir_info=$lim_color_err'\w'
+        		else
+            			local the_dir_info=$lim_color_dir'\w'
+        		fi
+
+		else
+			# for normal user 
+			# if user has permission on dir, color normal and if not, gray
+			if [ $dir_flag -eq 1 ] 2>/dev/null; then
+            			local the_dir_info=$lim_color_dir'\w'
+        		else
+            			local the_dir_info=$c_gray'\w'
+        		fi
+		fi
 		printf "%s" "$the_dir_info"
 	}
 	
@@ -200,9 +223,9 @@ main() {
 	color_git() {
 		if shopt -q promptvars; then
 			local info="$1"
-            		local the_git="$lim_color_git$info$color_reset"
+            		local the_git=$lim_color_git$info
         	else
-            		local the_git="$lim_color_git$info$color_reset"
+            		local the_git=$lim_color_git$info
         	fi
 
 		echo "$the_git"
@@ -211,6 +234,8 @@ main() {
 	#func too color prompt ready indicator
 	color_symbol() {	
 		# check last exit code and color red if err
+		local symbol
+
 		if [ $LAST_EXIT_CODE -eq 0 ]; then
             		local symbol=$lim_color_ok
         	else
@@ -219,9 +244,21 @@ main() {
         	
 		# check user status if superuser "#" else "$"
         	if [ "$(id -u)" -eq 0 ]; then
-            		symbol="$symbol# $c_white"
+			case "$theme" in
+                        default)
+                        local symbol="$symbol"
+                        ;;
+                        git_bash)
+                        local symbol="$symbol╠═"
+                        ;;
+                        *)
+                        local symbol="$symbol"
+                        ;;
+                esac
+
+            		local symbol="$symbol# "$color_reset
         	else
-            		symbol="$symbol$ $c_white"
+            		local symbol="$symbol$ "$color_reset
         	fi
 		printf "%s" "$symbol"
 
@@ -238,7 +275,7 @@ main() {
 	# finally set PS1
 	case "$theme" in
                 default)
-                        export PS1="$the_venv$the_host:$the_dir${the_git}$the_symbol"
+                        export PS1="$the_venv$the_host:$the_dir$the_git$the_symbol"
                         ;;
                 git_bash)
                         export PS1="$the_venv$the_host $the_dir$the_git\n$the_symbol"
