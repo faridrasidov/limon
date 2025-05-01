@@ -1,5 +1,6 @@
 
 
+
 **limon**
 
 limon is shell script to color bash prompt
@@ -8,14 +9,21 @@ limon is shell script to color bash prompt
 
 ![limon](https://raw.github.com/FaridRasidov/limon/master/example.png)
 
+**Root User**
+- <i>if path is  '/root*' or '/home*' colors normal and when it's in another '/*' dir red</i>
 
-- <i>if path is  '/root' or '/home' colors aqua and when it's in another '/*' dir red</i>
+**Regular User**
+- <i>if user has permission on dir colors normal and if not colors gray</i>
+
+**Common**
 - <i>checks last exit code and displays red if any errors happend</i>
 - <i>shows (venv) if some virtual env is activated</i>
 * <i>shows git branch name</i>
 * <i>if there's Uncommitted Changes Shows "(@)"</i>
 * <i>if there's commits not uploaded to remote shows "↑" and number of commits</i>
 * <i>if there's commits not downloaded from remote shows "↓" and number of commits</i>
+ - <i>limon has persistance mode, which means it saves your last theme settings</i>
+ - <i>comes with auto completer</i> 
 - <i>use bash builtin when possible to reduce delay "delay sucks!"</i>
 - <i>now you can select theme from available themes</i>
 - <i>no need for patched fonts</i>
