@@ -1,0 +1,12 @@
+# Limon Neon Theme
+
+col_ok='\[\e[38;5;46m\]'      # Neon Green
+col_err='\[\e[38;5;196m\]'    # Bright Red
+col_git='\[\e[38;5;226m\]'    # Bright Yellow
+col_dir='\[\e[38;5;51m\]'     # Cyan
+col_host='\[\e[38;5;198m\]'   # Hot Pink
+col_time='\[\e[38;5;93m\]'    # Purple
+
+theme_multiline=0
+theme_separator=":"
+theme_symbol_prefix=""

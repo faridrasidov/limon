@@ -1,344 +1,228 @@
 #!/usr/bin/env bash
 
-# get last exit code
-exit_code() {
-	LAST_EXIT_CODE=$?
-}
+# limon - Optimized Bash Prompt
+# Features: 256-Color ANSI Support, Color Picker, Silent Default, Modular Themes
 
-# get subcommmand and shift 
-SUBCOMMAND="$1"
-shift
-
-# get/save last configuration from/to conf file
-LIMON_CONF="$HOME/.limon_conf"
-if [ $# -eq 0 ]; then
-    if [ -f "$LIMON_CONF" ]; then
-        read -r -a saved_flags < "$LIMON_CONF"
-    else
-        echo "no config found. creating default config."
-        echo "-s default" > "$LIMON_CONF"
-        saved_flags=(-s default)
-    fi
-    set -- "${saved_flags[@]}"
-else
-    echo "$@" > "$LIMON_CONF"
+# --- 1. Self-Healing & Safety ---
+if [[ "$DEFAULT_PROMPT_COMMAND" == *"not found"* ]] || \
+   [[ "$DEFAULT_PROMPT_COMMAND" == *"limon_runner"* ]] || \
+   [[ "$DEFAULT_PROMPT_COMMAND" == *"PROMPT_COMMAND"* ]]; then
+    DEFAULT_PROMPT_COMMAND=""
 fi
 
-# Save the original PS1 and PROMPT_COMMAND
 if [ -z "${DEFAULT_PS1}" ]; then
     DEFAULT_PS1="${PS1}"
     export DEFAULT_PS1
 fi
 
-# Set DEFAULT_PROMPT_COMMAND to empty string if PROMPT_COMMAND is not set
-if [ -z "${PROMPT_COMMAND}" ]; then
-    DEFAULT_PROMPT_COMMAND="${PROMPT_COMMAND}"
-else
+if [[ -z "${PROMPT_COMMAND}" ]]; then
     DEFAULT_PROMPT_COMMAND=""
+else
+    if [[ "$PROMPT_COMMAND" != *"limon_runner"* ]]; then
+        DEFAULT_PROMPT_COMMAND="${PROMPT_COMMAND}"
+    fi
 fi
 export DEFAULT_PROMPT_COMMAND
 
-# set default values
-S_CASE=0
-POSITIONAL_ARG="default"
+# --- 2. Path & Config Setup ---
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-# getting args and enabling flags
-while getopts ":snc" opt; do
-	case $opt in
-	  c)
-	    FLAG_CONTINOUS=1
-	    FLAG_NEW_LINE=0
-	    ;;
-	  n)
-	    FLAG_CONTINOUS=0
-	    FLAG_NEW_LINE=1
-	    ;;
-	  s)
-	    S_CASE=1
-	    FLAG_SILENT=1 
-	    ;;
-	  \?)
-	    echo "Invalid Flag: -$OPTARG" >&2 
-	    ;;
-	esac
-done
-shift $((OPTIND - 1))
+if [[ -n "$XDG_CONFIG_HOME" ]]; then
+    LIMON_CONF_DIR="$XDG_CONFIG_HOME/limon"
+else
+    LIMON_CONF_DIR="$HOME/.config/limon"
+fi
+LIMON_CONF="$LIMON_CONF_DIR/limon.conf"
+mkdir -p "$LIMON_CONF_DIR"
 
-# getting theme value
-POSITIONAL_ARG="$1"
+# --- 3. Subcommand & Config Loading ---
+SUBCOMMAND="$1"
+shift
 
-# main func to control limon when it's on
+# A. Extract "Saved Theme"
+saved_theme="default"
+if [ -f "$LIMON_CONF" ]; then
+    read -r -a conf_parts < "$LIMON_CONF"
+    for part in "${conf_parts[@]}"; do
+        if [[ "$part" != -* ]]; then
+            saved_theme="$part"
+        fi
+    done
+fi
+
+# B. Handle Arguments
+THEME_NAME="$1"
+if [[ -z "$THEME_NAME" ]]; then
+    THEME_NAME="$saved_theme"
+fi
+
+# --- 4. Save State ---
+if [[ "$SUBCOMMAND" == "on" ]]; then
+    echo "$THEME_NAME" > "$LIMON_CONF"
+fi
+
+# --- 5. Timer Logic ---
+timer_start() {
+    timer=${timer:-$SECONDS}
+}
+
+# --- 6. Main Prompt Function ---
 main() {
-	structure_GIT=1
-	
-	# get args
-	local silent=$FLAG_SILENT
-    	local newline=$FLAG_NEW_LINE
-    	local continous=$FLAG_CONTINOUS
-	local theme=$POSITIONAL_ARG
-	
-	# define all colors
-	local c_black='\[\033[1;30m\]'
-	local c_red='\[\033[1;31m\]'
-	local c_green='\[\033[1;32m\]'
-	local c_yellow='\[\033[1;33m\]'
-	local c_blue='\[\033[1;34m\]'
-	local c_purple='\[\033[1;35m\]'
-	local c_cyan='\[\033[1;36m\]'
-	local c_white='\[\033[1;37m\]'
-	local c_gray='\[\033[1;90m\]'
+    local last_exit=$LAST_EXIT_CODE
+    local theme_name="${1:-default}"
+    
+    # --- DEFAULT COLORS (256 ANSI) ---
+    # These act as fallbacks if the theme file doesn't define them
+    local col_ok='\[\e[38;5;44m\]'      # Teal (44)
+    local col_err='\[\e[38;5;160m\]'    # Red (160)
+    local col_git='\[\e[38;5;214m\]'    # Orange (214)
+    local col_dir='\[\e[38;5;39m\]'     # Blue (39)
+    local col_host='\[\e[38;5;118m\]'   # Bright Green (118)
+    local col_time='\[\e[38;5;242m\]'   # Grey (242)
+    local theme_multiline=0
+    local theme_separator=":"
+    local theme_symbol_prefix=""
 
-	# define git symbols
-	local sym_git_branch=''
-    	local sym_git_modified=' (@)'
-    	local sym_git_push='↑'
-    	local sym_git_pull='↓'
-	
-	local color_reset='\[\033[m\]'
-        
-	# selecting color patterns for each thmme
-	case "$theme" in
-		default)
-			lim_color_ok=$c_cyan
-                       	lim_color_err=$c_red
-                        lim_color_git=$c_yellow
-                        lim_color_dir=$c_cyan
-                        lim_color_host=$c_green
-			;;
-                git_bash)
-                        lim_color_ok=$c_cyan
-                        lim_color_err=$c_red
-                        lim_color_git=$c_cyan
-                        lim_color_dir=$c_yellow
-                        lim_color_host=$c_green
-                        ;;
-                *)
-                        ;;
-	esac
-	
-	# func to get info abou git dir
-	git_info() {
-		# diabled by you
-		[[ $structure_GIT = 0 ]] && return
-        	
-		# git not installed, if hash will give any error
-		hash git 2>/dev/null || return
-		
-		# forces git to output in eng
-        	local git_eng="env LANG=C git"
+    # Theme Loading
+    local theme_file=""
+    local search_paths=(
+        "$LIMON_CONF_DIR/themes/${theme_name}.theme"
+        "/usr/share/limon/themes/${theme_name}.theme"
+        "$SCRIPT_DIR/themes/${theme_name}.theme"
+    )
 
-		# get currwnt branch name 	
-        	local br_name=$($git_eng symbolic-ref --short HEAD 2>/dev/null)
+    for path in "${search_paths[@]}"; do
+        if [[ -f "$path" ]]; then
+            theme_file="$path"
+            break
+        fi
+    done
+    [[ -n "$theme_file" ]] && source "$theme_file"
 
-        	if [[ -n "$br_name" ]]; then
-			# put branch symbol
-            		br_name=$br_name
-        	else
-			# get tag name or short unique hash
-            		br_name=$($git_eng describe --tags --always 2>/dev/null)
-        	fi
+    # Timer
+    local elapsed_str=""
+    if [[ -n "$timer" ]]; then
+        local elapsed=$((SECONDS - timer))
+        if [[ $elapsed -ge 2 ]]; then
+             local min=$((elapsed / 60))
+             local sec=$((elapsed % 60))
+             [[ $min -gt 0 ]] && elapsed_str=" ${min}m ${sec}s" || elapsed_str=" ${sec}s"
+        fi
+        unset timer
+    fi
 
-		# not a it repo
-        	[[ -n "$br_name" ]] || return
+    local c_reset='\[\e[m\]'
+    local c_gray='\[\e[38;5;240m\]'
 
-        	local marks
+    # Git
+    local git_str=""
+    if command -v git >/dev/null 2>&1; then
+        if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            local branch="" marks="" push_count=0 pull_count=0
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^## ]]; then
+                    if [[ "$line" =~ "Initial commit on" ]]; then branch="master"
+                    elif [[ "$line" =~ ^##\ (HEAD\ \(no\ branch\)) ]]; then branch="${BASH_REMATCH[1]}"
+                    elif [[ "$line" =~ ^##\ ([^.[:space:]]+) ]]; then branch="${BASH_REMATCH[1]}"
+                    fi
+                    [[ "$line" =~ ahead\ ([0-9]+) ]] && push_count=${BASH_REMATCH[1]}
+                    [[ "$line" =~ behind\ ([0-9]+) ]] && pull_count=${BASH_REMATCH[1]}
+                else
+                    if [[ "$line" == \?\?* ]]; then marks+=" ?"; else marks+=" (@)"; fi
+                fi
+            done < <(git status --porcelain --branch 2>/dev/null)
 
-        	# scan first two lines of output from `git status`
-        	while IFS= read -r line; do
-			# header line
-            		if [[ $line =~ ^## ]]; then
-                		[[ $line =~ ahead\ ([0-9]+) ]] && marks+=" $sym_git_push${BASH_REMATCH[1]}"
-                		[[ $line =~ behind\ ([0-9]+) ]] && marks+=" $sym_git_pull${BASH_REMATCH[1]}"
-            		else
-                		# branch modified if output's more line after header
-                		marks="$sym_git_modified$marks"
-                		break
-            		fi
-        	done < <($git_eng status --porcelain --branch 2>/dev/null)
+            local final_marks=""
+            [[ "$marks" == *"(@)"* ]] && final_marks+=" (@)"
+            [[ "$marks" == *"?"* ]] && final_marks+=" ?"
+            [[ $push_count -gt 0 ]] && final_marks+=" ↑$push_count"
+            [[ $pull_count -gt 0 ]] && final_marks+=" ↓$pull_count"
+            
+            if [[ "$theme_multiline" -eq 1 ]]; then
+                 git_str="$col_git$final_marks ($branch)"
+            else
+                 git_str="$col_git$final_marks [$branch]"
+            fi
+        fi
+    fi
 
-        	# print the git branch status
-		case "$theme" in
-                	default)
-                        	printf "$marks [$br_name]"
-                        	;;
-                	git_bash)
-                        	printf "$marks ($br_name)"
-                        	;;
-                	*)
-                        	;;
-        	esac
-	}
-	
-	#func to color virtual env indicator
-	color_venv() {
-        	if [[ -z "$VIRTUAL_ENV" ]]; then
-            		local the_venv_info=''
-        	else
-            		local the_venv_info=$color_reset'(venv) '
-        	fi
-		printf "$the_venv_info"
-	}
-	
-	# func to color host & user section
-	color_host() {
-            	local the_hostname=$lim_color_host'\u@\h'
-		printf "%s" "$the_hostname"
-	}
-	
-	#func to color dir section
-	color_dir() {
-        	dir_owner_uid=$(stat -c '%u' . 2> /dev/null)
+    # Envs
+    local venv_str=""
+    [[ -n "$VIRTUAL_ENV" ]] && venv_str="(venv) "
+    [[ -n "$CONDA_DEFAULT_ENV" ]] && venv_str="(conda:$CONDA_DEFAULT_ENV) "
+    [[ -n "$DOCKER_MACHINE_NAME" ]] && venv_str+="(dkr:$DOCKER_MACHINE_NAME) "
+    [[ -n "$venv_str" ]] && venv_str="$c_reset$venv_str"
 
-		current_uid=$(id -u 2> /dev/null)
+    # Host & Dir
+    local host_str="$col_host\u@\h"
+    local dir_color=$col_dir
+    local lock_icon=""
+    
+    if [[ ! -w . ]]; then
+        lock_icon=" 🔒"
+        [[ "${EUID}" -ne 0 ]] && dir_color=$c_gray
+    fi
+    if [[ "${EUID}" -eq 0 && "$PWD" != /root* && "$PWD" != /home* && "$PWD" == /* ]]; then
+        dir_color=$col_err
+    fi
+    local dir_str="$dir_color\w$lock_icon"
 
-		local dir_flag
-		if [ "$dir_owner_uid" -eq "$current_uid" ] 2>/dev/null; then
-    			local dir_flag=1		
-		else
-    			local dir_flag=0
-		fi
+    # PS1 Construction
+    local time_display=""
+    [[ -n "$elapsed_str" ]] && time_display="$col_time$elapsed_str "
+    
+    local symbol_str="$col_ok"
+    [[ "$last_exit" -ne 0 ]] && symbol_str="$col_err"
+    [[ -n "$theme_symbol_prefix" ]] && symbol_str="$symbol_str$theme_symbol_prefix"
+    
+    if [[ "${EUID}" -eq 0 ]]; then symbol_str="$symbol_str# ${c_reset}"; else symbol_str="$symbol_str$ ${c_reset}"; fi
 
-		if [ "$current_uid" -eq 0 ]; then
-			# for root user 
-			# if path '/root*' or '/home*', color normal for other '/' subdirs, red
-			if [[ "$PWD" != /root* && "$PWD" != /home* && "$PWD" == /* ]]; then
-            			local the_dir_info=$lim_color_err'\w'
-        		else
-            			local the_dir_info=$lim_color_dir'\w'
-        		fi
-
-		else
-			# for normal user 
-			# if user has permission on dir, color normal and if not, gray
-			if [ $dir_flag -eq 1 ] 2>/dev/null; then
-            			local the_dir_info=$lim_color_dir'\w'
-        		else
-            			local the_dir_info=$c_gray'\w'
-        		fi
-		fi
-		printf "%s" "$the_dir_info"
-	}
-	
-	#func to color git section
-	color_git() {
-		if shopt -q promptvars; then
-			local info="$1"
-            		local the_git=$lim_color_git$info
-        	else
-            		local the_git=$lim_color_git$info
-        	fi
-
-		echo "$the_git"
-	}
-	
-	#func too color prompt ready indicator
-	color_symbol() {	
-		# check last exit code and color red if err
-		local symbol
-
-		if [ $LAST_EXIT_CODE -eq 0 ]; then
-            		local symbol=$lim_color_ok
-        	else
-            		local symbol=$lim_color_err
-        	fi
-        	
-		# check user status if superuser "#" else "$"
-        	if [ "$(id -u)" -eq 0 ]; then
-			case "$theme" in
-                        default)
-                        local symbol="$symbol"
-                        ;;
-                        git_bash)
-                        local symbol="$symbol╠═"
-                        ;;
-                        *)
-                        local symbol="$symbol"
-                        ;;
-                esac
-
-            		local symbol="$symbol# "$color_reset
-        	else
-            		local symbol="$symbol$ "$color_reset
-        	fi
-		printf "%s" "$symbol"
-
-	}
-	
-	local the_git_info=$(git_info)
-		
-	local the_venv=$(color_venv)
-	local the_host=$(color_host)
-	local the_dir=$(color_dir)
-	local the_git=$(color_git "$the_git_info")
-	local the_symbol=$(color_symbol)
-
-	# finally set PS1
-	case "$theme" in
-                default)
-                        export PS1="$the_venv$the_host:$the_dir$the_git$the_symbol"
-                        ;;
-                git_bash)
-                        export PS1="$the_venv$the_host $the_dir$the_git\n$the_symbol"
-                        ;;
-                *)
-                        ;;
-        esac
-
-	# return FLAG_SILENT to back state if S_CASE is 0
-	if [[ -z "$FLAG_SILENT" || "$FLAG_SILENT" -eq 1 ]] && [[ "$S_CASE" -eq 0 ]]; then
-    		FLAG_SILENT=0
-	else
-    		FLAG_SILENT=1
-	fi
-
+    if [[ "$theme_multiline" -eq 1 ]]; then
+        export PS1="$venv_str$host_str $dir_str$git_str$time_display\n$symbol_str"
+    else
+        export PS1="$venv_str$host_str$theme_separator$dir_str$git_str$time_display$symbol_str"
+    fi
 }
+export -f main
 
-
-# func to turn on limon
-__structure_on() {
-	structure_GIT=1
-    	# Update PROMPT_COMMAND
-    	PROMPT_COMMAND="exit_code; main${DEFAULT_PROMPT_COMMAND:+; $DEFAULT_PROMPT_COMMAND}"
+# --- 7. Runner ---
+limon_runner() {
+    LAST_EXIT_CODE=$?
+    main "$LIMON_THEME_ARG"
 }
+export -f limon_runner
 
+export LIMON_THEME_ARG="$THEME_NAME"
 
-
-# func to turn off the limon and return PS1 to system default
-__structure_off() {
-    structure_GIT=0
-    export PS1="$DEFAULT_PS1"
-    PROMPT_COMMAND="$DEFAULT_PROMPT_COMMAND"
-}
-
-# main controller logic of script
 case "$SUBCOMMAND" in
     on)
-	__structure_on
-	if [[ "$FLAG_SILENT" -eq 0 ]]; then
-            echo "limon enabled"
-        else
-            :
-        fi
+        trap 'timer_start' DEBUG
+        PROMPT_COMMAND="limon_runner${DEFAULT_PROMPT_COMMAND:+; $DEFAULT_PROMPT_COMMAND}"
         ;;
-
     off)
-	__structure_off
-        if [[ "$FLAG_SILENT" -eq 0 ]]; then
-	    echo "limon disabled"
-	else
-	    :	
-	fi
-    	;;
+        trap - DEBUG
+        export PS1="$DEFAULT_PS1"
+        PROMPT_COMMAND="$DEFAULT_PROMPT_COMMAND"
+        unset timer
+        ;;
+    colors)
+        echo "Limon 256-Color Palette:"
+        echo "Usage in themes: col_git='\[\e[38;5;214m\]' (This is color 214)"
+        echo ""
+        for i in {0..255}; do
+            printf "\x1b[38;5;${i}m%3d\x1b[0m " "$i"
+            if (( (i + 1) % 16 == 0 )); then echo; fi
+        done
+        echo ""
+        ;;
     help)
         echo "
-limon is the bash color Prompt
+limon - Optimized Bash Prompt
 
 Usage:
-        on [-s] <theme name>: turn on the limon
-        off [-s]: turn off the limon and restore system PS1
-        help : help to use command
-
-        adding '-s' option to on/off indicated the silent mode
+    limon on [theme]
+    limon off
+    limon colors    (Show ANSI color codes)
 "
         ;;
 esac

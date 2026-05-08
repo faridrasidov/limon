@@ -1,0 +1,12 @@
+# Limon Ocean Theme
+
+col_ok='\[\e[38;5;33m\]'      # Dodger Blue
+col_err='\[\e[38;5;160m\]'    # Red
+col_git='\[\e[38;5;159m\]'    # Pale Cyan
+col_dir='\[\e[38;5;39m\]'     # Deep Sky Blue
+col_host='\[\e[38;5;27m\]'    # Blue
+col_time='\[\e[38;5;242m\]'   # Grey
+
+theme_multiline=0
+theme_separator=" | "
+theme_symbol_prefix=""

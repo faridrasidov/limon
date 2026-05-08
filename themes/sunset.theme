@@ -1,0 +1,12 @@
+# Limon Sunset Theme
+
+col_ok='\[\e[38;5;214m\]'     # Orange
+col_err='\[\e[38;5;124m\]'    # Dark Red
+col_git='\[\e[38;5;203m\]'    # Soft Red/Pink
+col_dir='\[\e[38;5;220m\]'    # Gold
+col_host='\[\e[38;5;208m\]'   # Dark Orange
+col_time='\[\e[38;5;130m\]'   # Brown/Orange
+
+theme_multiline=1
+theme_separator=" "
+theme_symbol_prefix="➜ "

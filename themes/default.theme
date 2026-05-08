@@ -1,0 +1,12 @@
+# Limon Default Theme (256-Color)
+
+col_ok='\[\e[38;5;44m\]'      # Teal
+col_err='\[\e[38;5;196m\]'    # Bright Red
+col_git='\[\e[38;5;214m\]'    # Orange
+col_dir='\[\e[38;5;39m\]'     # Deep Sky Blue
+col_host='\[\e[38;5;118m\]'   # Bright Green
+col_time='\[\e[38;5;242m\]'   # Grey
+
+theme_multiline=0
+theme_separator=":"
+theme_symbol_prefix=""

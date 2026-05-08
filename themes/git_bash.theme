@@ -1,0 +1,12 @@
+# Limon Git Bash Theme (256-Color)
+
+col_ok='\[\e[38;5;87m\]'      # Cyan
+col_err='\[\e[38;5;160m\]'    # Red
+col_git='\[\e[38;5;87m\]'     # Cyan
+col_dir='\[\e[38;5;220m\]'    # Gold/Yellow
+col_host='\[\e[38;5;46m\]'    # Neon Green
+col_time='\[\e[38;5;171m\]'   # Light Purple
+
+theme_multiline=1
+theme_separator=" "
+theme_symbol_prefix="➜ "
