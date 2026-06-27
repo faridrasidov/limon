@@ -1,27 +1,29 @@
-# 🍋 Limon - Fast, Pure Bash Color Prompt
+# 🍋 Limon — Fast Bash Prompt with Git Status, Themes & Timer (Pure Bash, No Nerd Font)
 
-**Limon** is a lightweight, pure Bash script designed to instantly upgrade your terminal prompt (PS1) with beautiful colors, Git status, and helpful indicators. 
+**Limon is a fast, lightweight Bash prompt** for Linux, macOS, WSL, and Git Bash on Windows. It instantly upgrades your terminal prompt (PS1) with beautiful 256-colors, Git branch status, an execution timer, and helpful indicators — using **pure Bash** with no Python, Node.js, or external dependencies.
 
-Tired of slow terminal prompts that rely on Python, Node.js, or heavy frameworks? Hate having to install special "patched" Nerd Fonts just to see a Git branch? Limon is built differently. It uses built-in Bash features to deliver a beautiful, informative, and **zero-delay** terminal experience.
+Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? Hate having to install special "patched" Nerd Fonts just to see a Git branch in your prompt? Limon is built differently. It uses built-in Bash features to deliver a beautiful, informative, and **zero-delay** custom bash prompt experience — perfect for customizing your `.bashrc` / `bashrc` prompt on any system.
 
-![Limon Example Prompt](https://raw.github.com/FaridRasidov/limon/master/example.png)
+**Works on:** Linux · macOS · WSL (Windows Subsystem for Linux) · Git Bash on Windows. **Requires:** Bash (Git optional, for the git branch indicator).
+
+![Limon bash prompt showing git branch, 256-color theme, and command execution timer in a Linux terminal](https://raw.github.com/FaridRasidov/limon/master/example.png)
 
 ---
 
-## ✨ Features
+## ✨ Features of this Fast Bash Prompt
 
-* ⚡ **Blazing Fast:** Written purely in Bash. No Python interpreters or heavy background processes slowing down your Enter key.
+* ⚡ **Blazing Fast:** Written purely in Bash. No Python interpreters or heavy background processes slowing down your Enter key — a truly lightweight, fast terminal prompt.
 * 🔤 **No Patched Fonts Required:** Uses standard, universal Unicode symbols. It looks perfect out-of-the-box on any OS or font.
 * 🎨 **256-Color Modular Themes:** Choose from 11 built-in themes (Limon, Dracula, Nord, Neon, and more) or easily create your own with the built-in color picker.
 * ⏱️ **Smart Execution Timer:** Automatically displays how long a command took to run (only appears if the command takes longer than 2 seconds).
-* 🌿 **Git Integration:** Instantly see your current branch, uncommitted changes `(@)`, untracked files `(?)`, and commits ahead/behind remote `(↑/↓)`.
+* 🌿 **Git Branch in Prompt:** Instantly see your current Git branch, uncommitted changes `(@)`, untracked files `(?)`, and commits ahead/behind remote `(↑/↓)` — git branch status right in your bash prompt.
 * 🔒 **Context-Aware Directories:** * Directories you don't have write access to are marked with a `🔒` and colored gray.
   * Warns you visually when operating as the `root` user outside of safe directories.
 * 🐍 **Environment Support:** Automatically detects and displays active `Python venv`, `Conda`, and `Docker` environments.
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation (Linux, macOS, WSL & Git Bash)
 
 **1. Download the repository:**
 ```shell
@@ -81,9 +83,9 @@ limon config timer_threshold=3
 
 ---
 
-## 🎨 Themes & Customization
+## 🎨 Custom Bash Prompt Themes & Customization
 
-Limon supports massive customization through simple `.theme` files. Themes are stored in `~/.config/limon/themes/`.
+Limon supports massive customization of your bash prompt through simple `.theme` files. Themes are stored in `~/.config/limon/themes/`.
 
 ### Built-in Themes
 
@@ -164,6 +166,49 @@ Modern prompt customization tools are incredibly powerful, but they often rely o
 Furthermore, many popular prompts force you to install specific "Nerd Fonts" to render their custom glyphs. If you use a simple bitmap font or log into a remote server, those icons break into ugly missing-character boxes.
 
 Limon was built to solve these two problems. It gives you the colorful, Git-aware, and timer-equipped prompt you want, but does it instantly, natively, and beautifully on any system.
+
+---
+
+## ⚖️ Limon vs. Alternatives (Starship, Powerlevel10k, Oh My Posh)
+
+If you've looked at customizing your shell prompt before, you've probably seen tools like **Starship**, **Powerlevel10k**, **Oh My Posh**, or **bash-git-prompt**. They are excellent and feature-rich, but they generally:
+
+* Require an external binary or interpreter (Rust, Go, Python, Node.js) to be installed and invoked on every prompt.
+* Often expect you to install **Nerd Fonts** to render their custom glyphs and icons.
+
+**Limon is a lightweight, pure-Bash alternative.** It has zero external dependencies (beyond optional Git), uses only universal Unicode symbols, and adds no measurable delay when you press `Enter`. If you want a fast bash prompt with git status and themes without installing a separate runtime or patched fonts, Limon is for you.
+
+---
+
+## ❓ FAQ
+
+**How do I add the Git branch to my Bash prompt?**
+Install Limon and run `limon on`. It automatically detects Git repositories and shows your current branch, plus indicators for uncommitted changes `(@)`, untracked files `(?)`, and commits ahead/behind the remote `(↑/↓)`.
+
+**What is the fastest Bash prompt?**
+Limon is written in pure Bash with no external interpreters, so there is no per-prompt startup cost from Python, Node.js, or a separate binary. This makes it one of the fastest, most lightweight ways to get a colorful, Git-aware prompt.
+
+**Do I need Nerd Fonts for a colored prompt?**
+No. Limon uses only standard, universal Unicode symbols and 256-color ANSI codes, so it looks correct out-of-the-box on any OS, terminal, or font — no patched Nerd Fonts required.
+
+**How do I customize PS1 in my `.bashrc`?**
+Add `limon on` to your `~/.bashrc` (or `/etc/bash.bashrc` for all users). Limon sets `PS1` for you and remembers your last theme. You can further customize the prompt with simple `.theme` files — see [Custom Bash Prompt Themes](#-custom-bash-prompt-themes--customization).
+
+**Does Limon work on Windows (WSL / Git Bash)?**
+Yes. Limon runs on Linux, macOS, WSL (Windows Subsystem for Linux), and Git Bash on Windows. There's even a built-in `git_bash` theme tuned for the Git Bash terminal.
+
+**How do I show command execution time in the prompt?**
+Limon includes a built-in execution timer that automatically shows how long a command took (by default only when it runs longer than 2 seconds). Adjust it with `limon config timer_threshold=N`.
+
+**How do I remove or disable Limon?**
+Run `limon off` to instantly restore your system's default prompt. To disable it permanently, remove the `limon on` line from your `.bashrc`.
+
+---
+
+## 🏷️ GitHub Topics
+
+To help others discover this project, the repository uses topics such as:
+`bash` · `shell` · `prompt` · `bash-prompt` · `ps1` · `git` · `terminal` · `cli` · `linux` · `macos` · `wsl` · `git-bash` · `themes` · `dotfiles` · `bashrc`
 
 ---
 
