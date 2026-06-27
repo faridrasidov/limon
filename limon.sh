@@ -34,57 +34,151 @@ fi
 LIMON_CONF="$LIMON_CONF_DIR/limon.conf"
 mkdir -p "$LIMON_CONF_DIR"
 
-_limon_theme_paths() {
-    local theme_name="$1"
-    echo "$LIMON_CONF_DIR/themes/${theme_name}.theme"
-    echo "/usr/share/limon/themes/${theme_name}.theme"
-    echo "$SCRIPT_DIR/themes/${theme_name}.theme"
+LIMON_TIMER_THRESHOLD=2
+LIMON_GIT_MODE=full
+LIMON_SHOW_HOST=1
+
+_limon_theme_dirs() {
+    echo "$LIMON_CONF_DIR/themes"
+    echo "/usr/share/limon/themes"
+    echo "$SCRIPT_DIR/themes"
 }
 
-_limon_theme_exists() {
+_limon_theme_paths() {
+    local theme_name="$1"
+    local dir
+    while IFS= read -r dir; do
+        echo "$dir/${theme_name}.theme"
+    done < <(_limon_theme_dirs)
+}
+
+_limon_resolve_theme_file() {
     local theme_name="$1"
     local path
     while IFS= read -r path; do
-        [[ -f "$path" ]] && return 0
+        if [[ -f "$path" ]]; then
+            echo "$path"
+            return 0
+        fi
     done < <(_limon_theme_paths "$theme_name")
     return 1
 }
 
+_limon_theme_exists() {
+    _limon_resolve_theme_file "$1" >/dev/null
+}
+
+_limon_list_themes() {
+    local dir file name seen=""
+    while IFS= read -r dir; do
+        [[ -d "$dir" ]] || continue
+        for file in "$dir"/*.theme; do
+            [[ -f "$file" ]] || continue
+            name="${file##*/}"
+            name="${name%.theme}"
+            [[ " $seen " == *" $name "* ]] && continue
+            seen+=" $name"
+            echo "$name"
+        done
+    done < <(_limon_theme_dirs)
+}
+
+_limon_load_config() {
+    saved_theme="default"
+    LIMON_TIMER_THRESHOLD=2
+    LIMON_GIT_MODE=full
+    LIMON_SHOW_HOST=1
+
+    if [[ -f "$LIMON_CONF" ]]; then
+        read -r -a conf_parts < "$LIMON_CONF"
+        for part in "${conf_parts[@]}"; do
+            case "$part" in
+                -timer_threshold=*) LIMON_TIMER_THRESHOLD="${part#*=}" ;;
+                -git=*) LIMON_GIT_MODE="${part#*=}" ;;
+                -show_host=*) LIMON_SHOW_HOST="${part#*=}" ;;
+                -*) ;;
+                *) saved_theme="$part" ;;
+            esac
+        done
+    fi
+}
+
+_limon_write_config() {
+    local theme_name="$1"
+    shift
+    local flags=("$@")
+    {
+        printf '%s' "$theme_name"
+        local flag
+        for flag in "${flags[@]}"; do
+            printf ' %s' "$flag"
+        done
+        printf '\n'
+    } > "$LIMON_CONF"
+}
+
+_limon_conf_flags() {
+    local flags=()
+    [[ "$LIMON_TIMER_THRESHOLD" != "2" ]] && flags+=("-timer_threshold=$LIMON_TIMER_THRESHOLD")
+    [[ "$LIMON_GIT_MODE" != "full" ]] && flags+=("-git=$LIMON_GIT_MODE")
+    [[ "$LIMON_SHOW_HOST" != "1" ]] && flags+=("-show_host=$LIMON_SHOW_HOST")
+    printf '%s\n' "${flags[@]}"
+}
+
+_limon_is_active() {
+    [[ "${PROMPT_COMMAND:-}" == *"limon_runner"* ]]
+}
+
 # --- 3. Subcommand & Config Loading ---
-SUBCOMMAND="$1"
-shift
+SUBCOMMAND="${1:-}"
+shift || true
 
-# A. Extract "Saved Theme"
-saved_theme="default"
-if [ -f "$LIMON_CONF" ]; then
-    read -r -a conf_parts < "$LIMON_CONF"
-    for part in "${conf_parts[@]}"; do
-        if [[ "$part" != -* ]]; then
-            saved_theme="$part"
-        fi
-    done
-fi
+_limon_load_config
 
-# B. Handle Arguments
-THEME_NAME="$1"
+THEME_NAME="${1:-}"
 if [[ -z "$THEME_NAME" ]]; then
     THEME_NAME="$saved_theme"
 fi
 
 # --- 4. Save State ---
 if [[ "$SUBCOMMAND" == "on" ]]; then
-    echo "$THEME_NAME" > "$LIMON_CONF"
+    mapfile -t _limon_flags < <(_limon_conf_flags)
+    _limon_write_config "$THEME_NAME" "${_limon_flags[@]}"
     if ! _limon_theme_exists "$THEME_NAME"; then
         echo "limon: theme '$THEME_NAME' not found, using built-in defaults" >&2
     fi
 fi
 
+export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST
+
 # --- 5. Git Info (single call + short cache) ---
+_limon_git_lite() {
+    __LIMON_GIT_BRANCH=""
+    __LIMON_GIT_MARKS=""
+    __LIMON_GIT_IN_REPO=0
+
+    if ! command -v git >/dev/null 2>&1; then
+        return
+    fi
+
+    local branch
+    branch="$(git --no-optional-locks symbolic-ref --short HEAD 2>/dev/null)" || \
+    branch="$(git --no-optional-locks rev-parse --short HEAD 2>/dev/null)" || return
+
+    __LIMON_GIT_BRANCH="$branch"
+    __LIMON_GIT_IN_REPO=1
+}
+
 # Sets: __LIMON_GIT_BRANCH, __LIMON_GIT_MARKS, __LIMON_GIT_IN_REPO
 _limon_git_info() {
     __LIMON_GIT_BRANCH=""
     __LIMON_GIT_MARKS=""
     __LIMON_GIT_IN_REPO=0
+
+    case "${LIMON_GIT_MODE:-full}" in
+        off) return ;;
+        lite) _limon_git_lite; return ;;
+    esac
 
     if ! command -v git >/dev/null 2>&1; then
         return
@@ -138,29 +232,22 @@ main() {
     local last_exit=$LAST_EXIT_CODE
     local theme_name="${1:-default}"
 
-    # --- DEFAULT COLORS (256 ANSI) ---
-    local col_ok='\[\e[38;5;44m\]'      # Teal (44)
-    local col_err='\[\e[38;5;160m\]'    # Red (160)
-    local col_git='\[\e[38;5;214m\]'    # Orange (214)
-    local col_dir='\[\e[38;5;39m\]'     # Blue (39)
-    local col_host='\[\e[38;5;118m\]'   # Bright Green (118)
-    local col_time='\[\e[38;5;242m\]'   # Grey (242)
+    local col_ok='\[\e[38;5;44m\]'
+    local col_err='\[\e[38;5;160m\]'
+    local col_git='\[\e[38;5;214m\]'
+    local col_dir='\[\e[38;5;39m\]'
+    local col_host='\[\e[38;5;118m\]'
+    local col_time='\[\e[38;5;242m\]'
     local theme_multiline=0
     local theme_separator=":"
     local theme_symbol_prefix=""
 
-    local theme_file="" path
-    while IFS= read -r path; do
-        if [[ -f "$path" ]]; then
-            theme_file="$path"
-            break
-        fi
-    done < <(_limon_theme_paths "$theme_name")
+    local theme_file
+    theme_file="$(_limon_resolve_theme_file "$theme_name" 2>/dev/null || true)"
     [[ -n "$theme_file" ]] && source "$theme_file"
 
-    # Timer (via PROMPT_COMMAND — no DEBUG trap)
     local elapsed_str=""
-    if [[ ${__LIMON_CMD_ELAPSED:-0} -ge 2 ]]; then
+    if [[ ${__LIMON_CMD_ELAPSED:-0} -ge ${LIMON_TIMER_THRESHOLD:-2} ]]; then
         local elapsed=$__LIMON_CMD_ELAPSED
         local min=$((elapsed / 60))
         local sec=$((elapsed % 60))
@@ -170,7 +257,6 @@ main() {
     local c_reset='\[\e[m\]'
     local c_gray='\[\e[38;5;240m\]'
 
-    # Git
     local git_str=""
     _limon_git_info
     if [[ ${__LIMON_GIT_IN_REPO:-0} -eq 1 ]]; then
@@ -181,7 +267,6 @@ main() {
         fi
     fi
 
-    # Environments (show all active, not just the last one)
     local env_parts=()
     [[ -n "$VIRTUAL_ENV" ]] && env_parts+=("(venv)")
     [[ -n "$CONDA_DEFAULT_ENV" ]] && env_parts+=("(conda:$CONDA_DEFAULT_ENV)")
@@ -195,8 +280,13 @@ main() {
         done
     fi
 
-    # Host & Dir
-    local host_str="$col_host\u@\h"
+    local host_str=""
+    if [[ "${LIMON_SHOW_HOST:-1}" == "1" ]]; then
+        local ssh_prefix=""
+        [[ -n "${SSH_CONNECTION:-}${SSH_CLIENT:-}" ]] && ssh_prefix="[ssh] "
+        host_str="$col_host${ssh_prefix}\u@\h"
+    fi
+
     local dir_color=$col_dir
     local lock_icon=""
 
@@ -209,9 +299,13 @@ main() {
     fi
     local dir_str="$dir_color\w$lock_icon"
 
-    # PS1 Construction
     local time_display=""
     [[ -n "$elapsed_str" ]] && time_display="$col_time$elapsed_str "
+
+    local jobs_str=""
+    local job_count
+    job_count="$(jobs -rp 2>/dev/null | wc -l | tr -d ' ')"
+    [[ "${job_count:-0}" -gt 0 ]] && jobs_str="[$job_count] "
 
     local symbol_str="$col_ok"
     [[ "$last_exit" -ne 0 ]] && symbol_str="$col_err"
@@ -220,9 +314,17 @@ main() {
     if [[ "${EUID}" -eq 0 ]]; then symbol_str="$symbol_str# ${c_reset}"; else symbol_str="$symbol_str$ ${c_reset}"; fi
 
     if [[ "$theme_multiline" -eq 1 ]]; then
-        export PS1="$venv_str$host_str $dir_str$git_str$time_display\n$symbol_str"
+        if [[ -n "$host_str" ]]; then
+            export PS1="$venv_str$host_str $dir_str$git_str$time_display$jobs_str\n$symbol_str"
+        else
+            export PS1="$venv_str$dir_str$git_str$time_display$jobs_str\n$symbol_str"
+        fi
     else
-        export PS1="$venv_str$host_str$theme_separator$dir_str$git_str$time_display$symbol_str"
+        if [[ -n "$host_str" ]]; then
+            export PS1="$venv_str$host_str$theme_separator$dir_str$git_str$time_display$jobs_str$symbol_str"
+        else
+            export PS1="$venv_str$dir_str$git_str$time_display$jobs_str$symbol_str"
+        fi
     fi
 }
 export -f main
@@ -257,6 +359,75 @@ case "$SUBCOMMAND" in
               __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC \
               __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
         ;;
+    reload)
+        if ! _limon_is_active; then
+            echo "limon: not active (run 'limon on' first)" >&2
+        else
+            unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC \
+                  __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
+            _limon_load_config
+            export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST
+            export LIMON_THEME_ARG="$saved_theme"
+            LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
+            limon_runner
+        fi
+        ;;
+    status)
+        if _limon_is_active; then
+            echo "Limon: on"
+        else
+            echo "Limon: off"
+        fi
+        echo "Theme: $saved_theme"
+        theme_path="$(_limon_resolve_theme_file "$saved_theme" 2>/dev/null || true)"
+        if [[ -n "$theme_path" ]]; then
+            echo "Theme file: $theme_path"
+        else
+            echo "Theme file: (built-in defaults)"
+        fi
+        echo "Config: $LIMON_CONF"
+        echo "Options: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST"
+        ;;
+    themes)
+        listed=0
+        while IFS= read -r name; do
+            listed=1
+            path="$(_limon_resolve_theme_file "$name" 2>/dev/null || true)"
+            if [[ -n "$path" ]]; then
+                printf '  %-12s %s\n' "$name" "$path"
+            else
+                printf '  %-12s (built-in defaults)\n' "$name"
+            fi
+        done < <(_limon_list_themes | sort)
+        if [[ $listed -eq 0 ]]; then
+            echo "No themes found."
+        fi
+        ;;
+    config)
+        CONFIG_ARG="${1:-}"
+        if [[ -z "$CONFIG_ARG" ]]; then
+            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1"
+            echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST"
+        else
+            case "$CONFIG_ARG" in
+                timer_threshold=*) LIMON_TIMER_THRESHOLD="${CONFIG_ARG#*=}" ;;
+                git=*) LIMON_GIT_MODE="${CONFIG_ARG#*=}" ;;
+                show_host=*) LIMON_SHOW_HOST="${CONFIG_ARG#*=}" ;;
+                *)
+                    echo "limon: unknown config option '$CONFIG_ARG'" >&2
+                    echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1" >&2
+                    ;;
+            esac
+            if [[ "$CONFIG_ARG" == timer_threshold=* || "$CONFIG_ARG" == git=* || "$CONFIG_ARG" == show_host=* ]]; then
+                mapfile -t _limon_flags < <(_limon_conf_flags)
+                _limon_write_config "$saved_theme" "${_limon_flags[@]}"
+                export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST
+                if _limon_is_active; then
+                    limon_runner
+                fi
+            fi
+        fi
+        ;;
     colors)
         echo "Limon 256-Color Palette:"
         echo "Usage in themes: col_git='\[\e[38;5;214m\]' (This is color 214)"
@@ -267,14 +438,22 @@ case "$SUBCOMMAND" in
         done
         echo ""
         ;;
-    help)
+    help|"")
         echo "
 limon - Optimized Bash Prompt
 
 Usage:
-    limon on [theme]
-    limon off
-    limon colors    (Show ANSI color codes)
+    limon on [theme]     Enable Limon (optionally set theme)
+    limon off            Restore default prompt
+    limon reload         Reload theme and config
+    limon status         Show current state
+    limon themes         List available themes
+    limon config KEY=VAL Set timer_threshold, git mode, or show_host
+    limon colors         Show ANSI color codes
+    limon help           Show this help
+
+Config file: $LIMON_CONF
+  Example: neon -timer_threshold=3 -git=lite -show_host=1
 "
         ;;
 esac

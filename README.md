@@ -67,6 +67,16 @@ limon off
 
 ```
 
+**Other commands:**
+
+```bash
+limon status          # Show on/off, theme, and config options
+limon themes          # List all available themes
+limon reload          # Reload theme/config without toggling off
+limon config git=lite # Set git mode: full, lite, or off
+limon config timer_threshold=3
+```
+
 *(Note: Limon remembers your last used theme automatically!)*
 
 ---
