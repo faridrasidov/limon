@@ -5,8 +5,7 @@
 
 # --- 1. Self-Healing & Safety ---
 if [[ "$DEFAULT_PROMPT_COMMAND" == *"not found"* ]] || \
-   [[ "$DEFAULT_PROMPT_COMMAND" == *"limon_runner"* ]] || \
-   [[ "$DEFAULT_PROMPT_COMMAND" == *"PROMPT_COMMAND"* ]]; then
+   [[ "$DEFAULT_PROMPT_COMMAND" == *"limon_runner"* ]]; then
     DEFAULT_PROMPT_COMMAND=""
 fi
 
@@ -35,6 +34,22 @@ fi
 LIMON_CONF="$LIMON_CONF_DIR/limon.conf"
 mkdir -p "$LIMON_CONF_DIR"
 
+_limon_theme_paths() {
+    local theme_name="$1"
+    echo "$LIMON_CONF_DIR/themes/${theme_name}.theme"
+    echo "/usr/share/limon/themes/${theme_name}.theme"
+    echo "$SCRIPT_DIR/themes/${theme_name}.theme"
+}
+
+_limon_theme_exists() {
+    local theme_name="$1"
+    local path
+    while IFS= read -r path; do
+        [[ -f "$path" ]] && return 0
+    done < <(_limon_theme_paths "$theme_name")
+    return 1
+}
+
 # --- 3. Subcommand & Config Loading ---
 SUBCOMMAND="$1"
 shift
@@ -59,20 +74,71 @@ fi
 # --- 4. Save State ---
 if [[ "$SUBCOMMAND" == "on" ]]; then
     echo "$THEME_NAME" > "$LIMON_CONF"
+    if ! _limon_theme_exists "$THEME_NAME"; then
+        echo "limon: theme '$THEME_NAME' not found, using built-in defaults" >&2
+    fi
 fi
 
-# --- 5. Timer Logic ---
-timer_start() {
-    timer=${timer:-$SECONDS}
+# --- 5. Git Info (single call + short cache) ---
+# Sets: __LIMON_GIT_BRANCH, __LIMON_GIT_MARKS, __LIMON_GIT_IN_REPO
+_limon_git_info() {
+    __LIMON_GIT_BRANCH=""
+    __LIMON_GIT_MARKS=""
+    __LIMON_GIT_IN_REPO=0
+
+    if ! command -v git >/dev/null 2>&1; then
+        return
+    fi
+
+    if [[ "${__LIMON_GIT_CACHE_PWD:-}" == "$PWD" && \
+          $((SECONDS - ${__LIMON_GIT_CACHE_SEC:-0})) -lt 1 ]]; then
+        __LIMON_GIT_BRANCH="$__LIMON_GIT_CACHE_BRANCH"
+        __LIMON_GIT_MARKS="$__LIMON_GIT_CACHE_MARKS"
+        __LIMON_GIT_IN_REPO=1
+        return
+    fi
+
+    local line marks="" push_count=0 pull_count=0 got_branch=0
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^## ]]; then
+            got_branch=1
+            if [[ "$line" =~ ^##\ No\ commits\ yet\ on\ (.+) ]]; then
+                __LIMON_GIT_BRANCH="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^##\ (HEAD\ \(no\ branch\)) ]]; then
+                __LIMON_GIT_BRANCH="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^##\ ([^.[:space:]]+) ]]; then
+                __LIMON_GIT_BRANCH="${BASH_REMATCH[1]}"
+            fi
+            [[ "$line" =~ ahead\ ([0-9]+) ]] && push_count=${BASH_REMATCH[1]}
+            [[ "$line" =~ behind\ ([0-9]+) ]] && pull_count=${BASH_REMATCH[1]}
+        else
+            if [[ "$line" == \?\?* ]]; then marks+=" ?"; else marks+=" (@)"; fi
+        fi
+    done < <(git --no-optional-locks status --porcelain --branch 2>/dev/null)
+
+    if [[ $got_branch -eq 1 ]]; then
+        __LIMON_GIT_IN_REPO=1
+        [[ "$marks" == *"(@)"* ]] && __LIMON_GIT_MARKS+=" (@)"
+        [[ "$marks" == *"?"* ]] && __LIMON_GIT_MARKS+=" ?"
+        [[ $push_count -gt 0 ]] && __LIMON_GIT_MARKS+=" ↑$push_count"
+        [[ $pull_count -gt 0 ]] && __LIMON_GIT_MARKS+=" ↓$pull_count"
+
+        __LIMON_GIT_CACHE_PWD="$PWD"
+        __LIMON_GIT_CACHE_SEC=$SECONDS
+        __LIMON_GIT_CACHE_BRANCH="$__LIMON_GIT_BRANCH"
+        __LIMON_GIT_CACHE_MARKS="$__LIMON_GIT_MARKS"
+    else
+        unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC \
+              __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
+    fi
 }
 
 # --- 6. Main Prompt Function ---
 main() {
     local last_exit=$LAST_EXIT_CODE
     local theme_name="${1:-default}"
-    
+
     # --- DEFAULT COLORS (256 ANSI) ---
-    # These act as fallbacks if the theme file doesn't define them
     local col_ok='\[\e[38;5;44m\]'      # Teal (44)
     local col_err='\[\e[38;5;160m\]'    # Red (160)
     local col_git='\[\e[38;5;214m\]'    # Orange (214)
@@ -83,32 +149,22 @@ main() {
     local theme_separator=":"
     local theme_symbol_prefix=""
 
-    # Theme Loading
-    local theme_file=""
-    local search_paths=(
-        "$LIMON_CONF_DIR/themes/${theme_name}.theme"
-        "/usr/share/limon/themes/${theme_name}.theme"
-        "$SCRIPT_DIR/themes/${theme_name}.theme"
-    )
-
-    for path in "${search_paths[@]}"; do
+    local theme_file="" path
+    while IFS= read -r path; do
         if [[ -f "$path" ]]; then
             theme_file="$path"
             break
         fi
-    done
+    done < <(_limon_theme_paths "$theme_name")
     [[ -n "$theme_file" ]] && source "$theme_file"
 
-    # Timer
+    # Timer (via PROMPT_COMMAND — no DEBUG trap)
     local elapsed_str=""
-    if [[ -n "$timer" ]]; then
-        local elapsed=$((SECONDS - timer))
-        if [[ $elapsed -ge 2 ]]; then
-             local min=$((elapsed / 60))
-             local sec=$((elapsed % 60))
-             [[ $min -gt 0 ]] && elapsed_str=" ${min}m ${sec}s" || elapsed_str=" ${sec}s"
-        fi
-        unset timer
+    if [[ ${__LIMON_CMD_ELAPSED:-0} -ge 2 ]]; then
+        local elapsed=$__LIMON_CMD_ELAPSED
+        local min=$((elapsed / 60))
+        local sec=$((elapsed % 60))
+        [[ $min -gt 0 ]] && elapsed_str=" ${min}m ${sec}s" || elapsed_str=" ${sec}s"
     fi
 
     local c_reset='\[\e[m\]'
@@ -116,48 +172,34 @@ main() {
 
     # Git
     local git_str=""
-    if command -v git >/dev/null 2>&1; then
-        if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            local branch="" marks="" push_count=0 pull_count=0
-            while IFS= read -r line; do
-                if [[ "$line" =~ ^## ]]; then
-                    if [[ "$line" =~ "Initial commit on" ]]; then branch="master"
-                    elif [[ "$line" =~ ^##\ (HEAD\ \(no\ branch\)) ]]; then branch="${BASH_REMATCH[1]}"
-                    elif [[ "$line" =~ ^##\ ([^.[:space:]]+) ]]; then branch="${BASH_REMATCH[1]}"
-                    fi
-                    [[ "$line" =~ ahead\ ([0-9]+) ]] && push_count=${BASH_REMATCH[1]}
-                    [[ "$line" =~ behind\ ([0-9]+) ]] && pull_count=${BASH_REMATCH[1]}
-                else
-                    if [[ "$line" == \?\?* ]]; then marks+=" ?"; else marks+=" (@)"; fi
-                fi
-            done < <(git status --porcelain --branch 2>/dev/null)
-
-            local final_marks=""
-            [[ "$marks" == *"(@)"* ]] && final_marks+=" (@)"
-            [[ "$marks" == *"?"* ]] && final_marks+=" ?"
-            [[ $push_count -gt 0 ]] && final_marks+=" ↑$push_count"
-            [[ $pull_count -gt 0 ]] && final_marks+=" ↓$pull_count"
-            
-            if [[ "$theme_multiline" -eq 1 ]]; then
-                 git_str="$col_git$final_marks ($branch)"
-            else
-                 git_str="$col_git$final_marks [$branch]"
-            fi
+    _limon_git_info
+    if [[ ${__LIMON_GIT_IN_REPO:-0} -eq 1 ]]; then
+        if [[ "$theme_multiline" -eq 1 ]]; then
+            git_str="$col_git$__LIMON_GIT_MARKS ($__LIMON_GIT_BRANCH)"
+        else
+            git_str="$col_git$__LIMON_GIT_MARKS [$__LIMON_GIT_BRANCH]"
         fi
     fi
 
-    # Envs
+    # Environments (show all active, not just the last one)
+    local env_parts=()
+    [[ -n "$VIRTUAL_ENV" ]] && env_parts+=("(venv)")
+    [[ -n "$CONDA_DEFAULT_ENV" ]] && env_parts+=("(conda:$CONDA_DEFAULT_ENV)")
+    [[ -n "$DOCKER_MACHINE_NAME" ]] && env_parts+=("(dkr:$DOCKER_MACHINE_NAME)")
     local venv_str=""
-    [[ -n "$VIRTUAL_ENV" ]] && venv_str="(venv) "
-    [[ -n "$CONDA_DEFAULT_ENV" ]] && venv_str="(conda:$CONDA_DEFAULT_ENV) "
-    [[ -n "$DOCKER_MACHINE_NAME" ]] && venv_str+="(dkr:$DOCKER_MACHINE_NAME) "
-    [[ -n "$venv_str" ]] && venv_str="$c_reset$venv_str"
+    if [[ ${#env_parts[@]} -gt 0 ]]; then
+        local part
+        venv_str="$c_reset"
+        for part in "${env_parts[@]}"; do
+            venv_str+="$part "
+        done
+    fi
 
     # Host & Dir
     local host_str="$col_host\u@\h"
     local dir_color=$col_dir
     local lock_icon=""
-    
+
     if [[ ! -w . ]]; then
         lock_icon=" 🔒"
         [[ "${EUID}" -ne 0 ]] && dir_color=$c_gray
@@ -170,11 +212,11 @@ main() {
     # PS1 Construction
     local time_display=""
     [[ -n "$elapsed_str" ]] && time_display="$col_time$elapsed_str "
-    
+
     local symbol_str="$col_ok"
     [[ "$last_exit" -ne 0 ]] && symbol_str="$col_err"
     [[ -n "$theme_symbol_prefix" ]] && symbol_str="$symbol_str$theme_symbol_prefix"
-    
+
     if [[ "${EUID}" -eq 0 ]]; then symbol_str="$symbol_str# ${c_reset}"; else symbol_str="$symbol_str$ ${c_reset}"; fi
 
     if [[ "$theme_multiline" -eq 1 ]]; then
@@ -188,6 +230,12 @@ export -f main
 # --- 7. Runner ---
 limon_runner() {
     LAST_EXIT_CODE=$?
+    if [[ -n "${__LIMON_CMD_START:-}" ]]; then
+        __LIMON_CMD_ELAPSED=$((SECONDS - __LIMON_CMD_START))
+    else
+        __LIMON_CMD_ELAPSED=0
+    fi
+    __LIMON_CMD_START=$SECONDS
     main "$LIMON_THEME_ARG"
 }
 export -f limon_runner
@@ -196,14 +244,18 @@ export LIMON_THEME_ARG="$THEME_NAME"
 
 case "$SUBCOMMAND" in
     on)
-        trap 'timer_start' DEBUG
+        __LIMON_CMD_START=$SECONDS
         PROMPT_COMMAND="limon_runner${DEFAULT_PROMPT_COMMAND:+; $DEFAULT_PROMPT_COMMAND}"
+        LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
+        __LIMON_CMD_ELAPSED=0
+        limon_runner
         ;;
     off)
-        trap - DEBUG
         export PS1="$DEFAULT_PS1"
         PROMPT_COMMAND="$DEFAULT_PROMPT_COMMAND"
-        unset timer
+        unset __LIMON_CMD_START __LIMON_CMD_ELAPSED \
+              __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC \
+              __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
         ;;
     colors)
         echo "Limon 256-Color Palette:"

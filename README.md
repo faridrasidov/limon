@@ -29,9 +29,9 @@ git clone https://github.com/faridrasidov/limon
 
 sudo mv limon/ /usr/share/
 
-sudo echo 'export TERM=xterm-256color' >> /etc/bash.bashrc
-sudo echo 'alias limon="source /usr/share/limon/limon.sh"' >> /etc/bash.bashrc
-sudo echo 'source /usr/share/limon/hint-limon.sh' >> /etc/bash.bashrc
+echo 'export TERM=xterm-256color' | sudo tee -a /etc/bash.bashrc
+echo 'alias limon="source /usr/share/limon/limon.sh"' | sudo tee -a /etc/bash.bashrc
+echo 'source /usr/share/limon/hint-limon.sh' | sudo tee -a /etc/bash.bashrc
 ```
 **2. Enabling Limon** 
 - **Enable For Current User**
@@ -42,8 +42,8 @@ source ~/.bashrc
 
 - **Enable For All Users**
 ```shell
-sudo echo 'limon on' >> /etc/bash.bashrc
-sudo source /etc/bash.bashrc
+echo 'limon on' | sudo tee -a /etc/bash.bashrc
+source /etc/bash.bashrc
 ```
 
 ---
