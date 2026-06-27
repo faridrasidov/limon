@@ -77,6 +77,7 @@ limon themes          # List all available themes
 limon reload          # Reload theme/config without toggling off
 limon config git=lite # Set git mode: full, lite, or off
 limon config timer_threshold=3
+limon config show_ssh=1 # Show an [ssh] tag on remote sessions (off by default)
 ```
 
 *(Note: Limon remembers your last used theme automatically!)*
