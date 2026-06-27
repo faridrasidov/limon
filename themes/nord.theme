@@ -1,0 +1,12 @@
+# Limon Nord Theme
+
+col_ok='\[\e[38;5;109m\]'     # Nord Frost
+col_err='\[\e[38;5;167m\]'    # Nord Red
+col_git='\[\e[38;5;117m\]'    # Nord Blue
+col_dir='\[\e[38;5;75m\]'     # Nord Bright Blue
+col_host='\[\e[38;5;253m\]'    # Nord Snow
+col_time='\[\e[38;5;245m\]'   # Nord Grey
+
+theme_multiline=0
+theme_separator=" | "
+theme_symbol_prefix=""

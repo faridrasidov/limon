@@ -1,0 +1,12 @@
+# Limon Dracula Theme
+
+col_ok='\[\e[38;5;84m\]'      # Dracula Green
+col_err='\[\e[38;5;203m\]'    # Dracula Red
+col_git='\[\e[38;5;212m\]'    # Dracula Pink
+col_dir='\[\e[38;5;87m\]'     # Dracula Cyan
+col_host='\[\e[38;5;141m\]'   # Dracula Purple
+col_time='\[\e[38;5;245m\]'   # Muted Grey
+
+theme_multiline=1
+theme_separator=" "
+theme_symbol_prefix="➜ "

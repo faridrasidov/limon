@@ -1,0 +1,12 @@
+# Limon High-Contrast Theme
+
+col_ok='\[\e[38;5;46m\]'      # Bright Green
+col_err='\[\e[38;5;196m\]'   # Bright Red
+col_git='\[\e[38;5;226m\]'   # Bright Yellow
+col_dir='\[\e[38;5;231m\]'   # Bright White
+col_host='\[\e[38;5;51m\]'    # Bright Cyan
+col_time='\[\e[38;5;248m\]'   # Light Grey
+
+theme_multiline=0
+theme_separator=":"
+theme_symbol_prefix=""

@@ -12,7 +12,7 @@ Tired of slow terminal prompts that rely on Python, Node.js, or heavy frameworks
 
 * ⚡ **Blazing Fast:** Written purely in Bash. No Python interpreters or heavy background processes slowing down your Enter key.
 * 🔤 **No Patched Fonts Required:** Uses standard, universal Unicode symbols. It looks perfect out-of-the-box on any OS or font.
-* 🎨 **256-Color Modular Themes:** Choose from built-in themes (Neon, Sunset, Ocean, etc.) or easily create your own with the built-in color picker.
+* 🎨 **256-Color Modular Themes:** Choose from 11 built-in themes (Limon, Dracula, Nord, Neon, and more) or easily create your own with the built-in color picker.
 * ⏱️ **Smart Execution Timer:** Automatically displays how long a command took to run (only appears if the command takes longer than 2 seconds).
 * 🌿 **Git Integration:** Instantly see your current branch, uncommitted changes `(@)`, untracked files `(?)`, and commits ahead/behind remote `(↑/↓)`.
 * 🔒 **Context-Aware Directories:** * Directories you don't have write access to are marked with a `🔒` and colored gray.
@@ -84,6 +84,42 @@ limon config timer_threshold=3
 ## 🎨 Themes & Customization
 
 Limon supports massive customization through simple `.theme` files. Themes are stored in `~/.config/limon/themes/`.
+
+### Built-in Themes
+
+Run `limon themes` to see every theme on your system. Apply any theme with `limon on <name>`.
+
+| Theme | Style | Layout |
+|-------|-------|--------|
+| `default` | Teal, blue, green | Single-line |
+| `limon` | Yellow-green brand colors | Two-line `➜` |
+| `neon` | Hot pink, cyan, yellow | Single-line |
+| `sunset` | Orange, gold, warm reds | Two-line `➜` |
+| `ocean` | Blues and pale cyan | Single-line ` \| ` |
+| `forest` | Greens and brown timer | Single-line |
+| `dracula` | Purple, pink, cyan | Two-line `➜` |
+| `nord` | Muted frost blues and snow | Single-line ` \| ` |
+| `mono` | Grayscale (SSH-friendly) | Single-line |
+| `high-contrast` | Bold green, red, yellow, white | Single-line |
+| `git_bash` | Cyan and gold (Windows Git Bash) | Two-line `➜` |
+
+**Preview (structure only — colors appear in your terminal):**
+
+```
+# limon on default
+user@host:/path/to/project (@) [main] $
+
+# limon on limon
+user@host /path/to/project (@) [main]
+➜ $
+
+# limon on dracula
+user@host /path/to/project (@) [main]
+➜ $
+
+# limon on nord
+user@host | /path/to/project (@) [main] $
+```
 
 ### Finding Colors
 

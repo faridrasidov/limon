@@ -1,0 +1,12 @@
+# Limon Forest Theme
+
+col_ok='\[\e[38;5;40m\]'      # Green
+col_err='\[\e[38;5;124m\]'    # Dark Red
+col_git='\[\e[38;5;64m\]'     # Forest Green
+col_dir='\[\e[38;5;34m\]'     # Dark Green
+col_host='\[\e[38;5;106m\]'   # Olive
+col_time='\[\e[38;5;130m\]'   # Brown
+
+theme_multiline=0
+theme_separator=":"
+theme_symbol_prefix=""

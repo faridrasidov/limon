@@ -1,0 +1,12 @@
+# Limon Brand Theme
+
+col_ok='\[\e[38;5;118m\]'     # Lime Green
+col_err='\[\e[38;5;196m\]'    # Red
+col_git='\[\e[38;5;220m\]'    # Gold
+col_dir='\[\e[38;5;154m\]'    # Yellow-Green
+col_host='\[\e[38;5;226m\]'   # Yellow
+col_time='\[\e[38;5;136m\]'   # Olive
+
+theme_multiline=1
+theme_separator=" "
+theme_symbol_prefix="➜ "

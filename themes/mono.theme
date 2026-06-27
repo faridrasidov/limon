@@ -1,0 +1,12 @@
+# Limon Mono Theme (grayscale)
+
+col_ok='\[\e[38;5;252m\]'     # Light Grey
+col_err='\[\e[38;5;248m\]'   # Mid Grey
+col_git='\[\e[38;5;250m\]'    # Soft Grey
+col_dir='\[\e[38;5;255m\]'    # White
+col_host='\[\e[38;5;246m\]'   # Grey
+col_time='\[\e[38;5;240m\]'   # Dark Grey
+
+theme_multiline=0
+theme_separator=":"
+theme_symbol_prefix=""
