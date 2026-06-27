@@ -4,8 +4,8 @@
 # Features: 256-Color ANSI Support, Color Picker, Silent Default, Modular Themes
 
 # --- 1. Self-Healing & Safety ---
-if [[ "$DEFAULT_PROMPT_COMMAND" == *"not found"* ]] || \
-   [[ "$DEFAULT_PROMPT_COMMAND" == *"limon_runner"* ]]; then
+if [[ "${DEFAULT_PROMPT_COMMAND:-}" == *"not found"* ]] || \
+   [[ "${DEFAULT_PROMPT_COMMAND:-}" == *"limon_runner"* ]]; then
     DEFAULT_PROMPT_COMMAND=""
 fi
 
