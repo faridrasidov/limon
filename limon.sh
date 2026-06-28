@@ -60,6 +60,8 @@ LIMON_SHOW_ROOT=1
 LIMON_SHOW_SUDO=1
 LIMON_K8S=0
 LIMON_CLOUD=0
+LIMON_SHOW_EXIT=0
+LIMON_EXIT_HINTS=0
 
 LIMON_UPDATE_STAMP="$LIMON_CONF_DIR/.last_update_check"
 LIMON_UPDATE_FLAG="$LIMON_CONF_DIR/.update_available"
@@ -125,6 +127,8 @@ _limon_load_config() {
     LIMON_SHOW_SUDO=1
     LIMON_K8S=0
     LIMON_CLOUD=0
+    LIMON_SHOW_EXIT=0
+    LIMON_EXIT_HINTS=0
 
     if [[ -f "$LIMON_CONF" ]]; then
         read -r -a conf_parts < "$LIMON_CONF"
@@ -143,6 +147,8 @@ _limon_load_config() {
                 -show_sudo=*) LIMON_SHOW_SUDO="${part#*=}" ;;
                 -k8s=*) LIMON_K8S="${part#*=}" ;;
                 -cloud=*) LIMON_CLOUD="${part#*=}" ;;
+                -show_exit=*) LIMON_SHOW_EXIT="${part#*=}" ;;
+                -exit_hints=*) LIMON_EXIT_HINTS="${part#*=}" ;;
                 -*) ;;
                 *) saved_theme="$part" ;;
             esac
@@ -179,6 +185,8 @@ _limon_conf_flags() {
     [[ "$LIMON_SHOW_SUDO" != "1" ]] && flags+=("-show_sudo=$LIMON_SHOW_SUDO")
     [[ "$LIMON_K8S" != "0" ]] && flags+=("-k8s=$LIMON_K8S")
     [[ "$LIMON_CLOUD" != "0" ]] && flags+=("-cloud=$LIMON_CLOUD")
+    [[ "$LIMON_SHOW_EXIT" != "0" ]] && flags+=("-show_exit=$LIMON_SHOW_EXIT")
+    [[ "$LIMON_EXIT_HINTS" != "0" ]] && flags+=("-exit_hints=$LIMON_EXIT_HINTS")
     printf '%s\n' "${flags[@]}"
 }
 
@@ -216,6 +224,7 @@ _limon_init_symbols() {
         __LIMON_SYM_DOWN="v"
         __LIMON_SYM_WARN="!"
         __LIMON_SYM_STASH="="
+        __LIMON_SYM_FAIL="x"
     else
         __LIMON_SYM_LOCK=" 🔒"
         __LIMON_SYM_ARROW="➜ "
@@ -223,6 +232,7 @@ _limon_init_symbols() {
         __LIMON_SYM_DOWN="↓"
         __LIMON_SYM_WARN="⚠"
         __LIMON_SYM_STASH="≡"
+        __LIMON_SYM_FAIL="✗"
     fi
 }
 
@@ -235,7 +245,58 @@ _limon_ascii_text() {
     s="${s//🔒/$__LIMON_SYM_LOCK}"
     s="${s//⚠/$__LIMON_SYM_WARN}"
     s="${s//≡/$__LIMON_SYM_STASH}"
+    s="${s//✗/$__LIMON_SYM_FAIL}"
     echo "$s"
+}
+
+# --- Phase 8: Exit-code clarity ---
+_limon_exit_hint() {
+    local code="$1"
+    case "$code" in
+        1) echo "error" ;;
+        2) echo "builtin" ;;
+        126) echo "not executable" ;;
+        127) echo "not found" ;;
+        130) echo "SIGINT" ;;
+        137) echo "SIGKILL" ;;
+        143) echo "SIGTERM" ;;
+        1[2-9][0-9]) echo "signal$((code - 128))" ;;
+        *) return 1 ;;
+    esac
+}
+
+_limon_prompt_symbol() {
+    local last_exit="$1"
+    local col_ok="$2"
+    local col_err="$3"
+    local c_reset="$4"
+    local theme_symbol_prefix="$5"
+
+    local prompt_char="$"
+    [[ "${EUID}" -eq 0 ]] && prompt_char="#"
+
+    local symbol_str="$col_ok"
+    [[ "$last_exit" -ne 0 ]] && symbol_str="$col_err"
+
+    if [[ "$last_exit" -ne 0 && "${LIMON_SHOW_EXIT:-0}" == "1" ]]; then
+        local exit_label="${__LIMON_SYM_FAIL}${last_exit}"
+        if [[ "${LIMON_EXIT_HINTS:-0}" == "1" ]]; then
+            local hint
+            hint="$(_limon_exit_hint "$last_exit" 2>/dev/null || true)"
+            [[ -n "$hint" ]] && exit_label+="(${hint})"
+        fi
+        if [[ -n "$theme_symbol_prefix" ]]; then
+            symbol_str="${symbol_str}${theme_symbol_prefix}${exit_label} ${prompt_char} ${c_reset}"
+        else
+            symbol_str="${symbol_str}${exit_label} ${prompt_char} ${c_reset}"
+        fi
+        echo -n "$symbol_str"
+        return
+    fi
+
+    [[ -n "$theme_symbol_prefix" ]] && symbol_str="${symbol_str}${theme_symbol_prefix}"
+    symbol_str="${symbol_str}${prompt_char} ${c_reset}"
+    echo -n "$symbol_str"
 }
 
 # --- Phase 6: Identity & safety helpers ---
@@ -531,7 +592,7 @@ fi
 
 export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
        LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD
+       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS
 
 # --- 5. Git Info (single call + short cache) ---
 _limon_git_op_state() {
@@ -797,11 +858,8 @@ main() {
     job_count="$(jobs -rp 2>/dev/null | wc -l | tr -d ' ')"
     [[ "${job_count:-0}" -gt 0 ]] && jobs_str="[$job_count] "
 
-    local symbol_str="$col_ok"
-    [[ "$last_exit" -ne 0 ]] && symbol_str="$col_err"
-    [[ -n "$theme_symbol_prefix" ]] && symbol_str="$symbol_str$theme_symbol_prefix"
-
-    if [[ "${EUID}" -eq 0 ]]; then symbol_str="$symbol_str# ${c_reset}"; else symbol_str="$symbol_str$ ${c_reset}"; fi
+    local symbol_str
+    symbol_str="$(_limon_prompt_symbol "$last_exit" "$col_ok" "$col_err" "$c_reset" "$theme_symbol_prefix")"
 
     local ps1=""
     if [[ "$theme_multiline" -eq 1 ]]; then
@@ -870,7 +928,7 @@ case "$SUBCOMMAND" in
             _limon_load_config
             export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
                    LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-                   LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD
+                   LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS
             export LIMON_THEME_ARG="$saved_theme"
             LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
             limon_runner
@@ -892,7 +950,7 @@ case "$SUBCOMMAND" in
         fi
         echo "Config: $LIMON_CONF"
         echo "Options: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
-        echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD"
+        echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS"
         if [[ -n "${LIMON_ENV:-}" ]]; then
             echo "Environment: LIMON_ENV=$LIMON_ENV"
         fi
@@ -930,7 +988,7 @@ case "$SUBCOMMAND" in
         if [[ -z "$CONFIG_ARG" ]]; then
             echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1"
             echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
-            echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD"
+            echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS"
         else
             config_ok=0
             case "$CONFIG_ARG" in
@@ -1006,6 +1064,18 @@ case "$SUBCOMMAND" in
                         *) echo "limon: cloud must be 0 or 1" >&2 ;;
                     esac
                     ;;
+                show_exit=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_SHOW_EXIT="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: show_exit must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
+                exit_hints=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_EXIT_HINTS="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: exit_hints must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
                 *)
                     echo "limon: unknown config option '$CONFIG_ARG'" >&2
                     echo "Usage: limon config ... host_color=auto|off|N env_banner=0|1 show_root=0|1 show_sudo=0|1 k8s=0|1 cloud=0|1" >&2
@@ -1016,7 +1086,7 @@ case "$SUBCOMMAND" in
                 _limon_write_config "$saved_theme" "${_limon_flags[@]}"
                 export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
                        LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-                       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD
+                       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS
                 if _limon_is_active; then
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
@@ -1088,6 +1158,10 @@ Git clarity:
     limon config git=verbose        Detailed +N staged, ~N modified, ?N untracked counts
     limon config git=lite           Branch name only (faster)
     limon config git=off            Hide git segment
+
+Exit codes:
+    limon config show_exit=1        Show exit code on failure (e.g. x127 $)
+    limon config exit_hints=1       Add hints like x130(SIGINT) when show_exit=1
 
 Config file: $LIMON_CONF
   Example: neon -env_banner=1 -host_color=auto -cloud=1 -k8s=1

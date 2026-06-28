@@ -126,6 +126,8 @@ limon themes          # List all available themes
 limon reload          # Reload theme/config without toggling off
 limon config git=lite    # Branch only (fast)
 limon config git=verbose # Detailed +N staged, ~N modified, ?N untracked
+limon config show_exit=1 # Show exit code on failure (e.g. x127 $)
+limon config exit_hints=1 # Add hints like x130(SIGINT) when show_exit=1
 limon config timer_threshold=3
 limon config show_ssh=1 # Show an [ssh] tag on remote sessions (off by default)
 limon config ascii=1    # Use ASCII symbols (# > ^ v) for dumb terminals
