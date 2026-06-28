@@ -140,14 +140,27 @@ do_install() {
         exit 1
     fi
 
-    mkdir -p "$TARGET_DIR/themes"
-    local f
-    for f in "${FILES[@]}"; do
-        cp -f "$SOURCE_DIR/$f" "$TARGET_DIR/$f"
-    done
-    cp -f "$SOURCE_DIR/install.sh" "$TARGET_DIR/install.sh" 2>/dev/null || true
-    if [[ -d "$SOURCE_DIR/themes" ]]; then
-        cp -f "$SOURCE_DIR/themes/"*.theme "$TARGET_DIR/themes/" 2>/dev/null || true
+    if [[ "$SOURCE_DIR" == "$TARGET_DIR" ]]; then
+        echo "limon-install: source and target are the same dir — installing in place."
+    elif [[ -d "$SOURCE_DIR/.git" ]]; then
+        # Source is a git checkout: copy the whole repo (including .git) so that
+        # 'limon upgrade' can pull future updates.
+        mkdir -p "$TARGET_DIR"
+        cp -a "$SOURCE_DIR/." "$TARGET_DIR/"
+        echo "limon-install: copied git repository (upgrades enabled via 'limon upgrade')"
+    else
+        # No git metadata available: copy just the runtime files.
+        # 'limon upgrade' will be unavailable; re-clone to enable it.
+        mkdir -p "$TARGET_DIR/themes"
+        local f
+        for f in "${FILES[@]}"; do
+            cp -f "$SOURCE_DIR/$f" "$TARGET_DIR/$f"
+        done
+        cp -f "$SOURCE_DIR/install.sh" "$TARGET_DIR/install.sh" 2>/dev/null || true
+        if [[ -d "$SOURCE_DIR/themes" ]]; then
+            cp -f "$SOURCE_DIR/themes/"*.theme "$TARGET_DIR/themes/" 2>/dev/null || true
+        fi
+        echo "limon-install: copied runtime files (no .git found — 'limon upgrade' unavailable)"
     fi
 
     # Refresh rc entries idempotently: strip any old block, then append a new one.

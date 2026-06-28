@@ -211,7 +211,9 @@ _limon_do_upgrade() {
     fi
     if [[ ! -d "$SCRIPT_DIR/.git" ]]; then
         echo "limon: not a git installation ($SCRIPT_DIR)." >&2
-        echo "limon: reinstall via 'git clone' to enable upgrades." >&2
+        echo "limon: to enable upgrades, reinstall from a clone:" >&2
+        echo "limon:   git clone https://github.com/faridrasidov/limon" >&2
+        echo "limon:   cd limon && ./install.sh   # add --system for all users" >&2
         return 1
     fi
     if [[ ! -w "$SCRIPT_DIR/.git" ]]; then
