@@ -25,28 +25,78 @@ Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? H
 
 ## 🚀 Installation (Linux, macOS, WSL & Git Bash)
 
-**1. Download the repository:**
+### Quick install (recommended)
+
+The included `install.sh` script copies Limon into place and wires it into your shell startup automatically.
+
 ```shell
 git clone https://github.com/faridrasidov/limon
+cd limon
+chmod +x install.sh
 
+# Install for the current user (no sudo needed):
+./install.sh
+
+# ...or install system-wide for all users:
+sudo ./install.sh --system
+```
+
+Then open a new terminal (or `source ~/.bashrc`) and Limon is on. The installer is **idempotent** — re-running it (or `limon upgrade`) safely refreshes the install without creating duplicate entries.
+
+### Manual install (alternative)
+
+Prefer to do it by hand? The steps the installer automates are:
+
+```shell
+git clone https://github.com/faridrasidov/limon
 sudo mv limon/ /usr/share/
 
 echo 'export TERM=xterm-256color' | sudo tee -a /etc/bash.bashrc
 echo 'alias limon="source /usr/share/limon/limon.sh"' | sudo tee -a /etc/bash.bashrc
 echo 'source /usr/share/limon/hint-limon.sh' | sudo tee -a /etc/bash.bashrc
 ```
-**2. Enabling Limon** 
-- **Enable For Current User**
+
+Then enable it:
+
+- **For the current user:**
 ```shell
 echo 'limon on' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-- **Enable For All Users**
+- **For all users:**
 ```shell
 echo 'limon on' | sudo tee -a /etc/bash.bashrc
 source /etc/bash.bashrc
 ```
+
+---
+
+## 🗑️ Uninstalling
+
+Removing Limon is just as easy as installing it. It will **ask whether to keep or delete your configuration** so your themes and settings aren't lost by accident.
+
+```shell
+limon uninstall
+```
+
+This removes Limon's startup entries from your `.bashrc` / `/etc/bash.bashrc`, deletes the installed files, restores your original prompt in the current shell, and then prompts:
+
+```
+Remove Limon configuration directory (~/.config/limon)? [y/N]
+```
+
+Answer **N** (default) to keep your config for a future reinstall, or **y** to delete it completely.
+
+You can also run the installer directly, which is handy for non-interactive or scripted removals:
+
+```shell
+./install.sh --uninstall              # Prompts about the config dir
+./install.sh --uninstall --purge      # Remove everything, including config
+./install.sh --uninstall --keep-config # Remove Limon, always keep config
+```
+
+> If Limon was installed system-wide, prefix the command with `sudo` so it can edit `/etc/bash.bashrc` and remove `/usr/share/limon`.
 
 ---
 
@@ -234,7 +284,7 @@ Limon includes a built-in execution timer that automatically shows how long a co
 Run `limon upgrade`. Since Limon is installed as a Git repository, this performs a safe fast-forward `git pull` and updates you to the newest release. You can also enable automatic daily update checks with `limon config autoupdate=notify` or `limon config autoupdate=on`.
 
 **How do I remove or disable Limon?**
-Run `limon off` to instantly restore your system's default prompt. To disable it permanently, remove the `limon on` line from your `.bashrc`.
+To temporarily disable it, run `limon off` to instantly restore your system's default prompt. To uninstall it completely, run `limon uninstall` (or `./install.sh --uninstall`) — it removes the startup entries and installed files, and asks whether to keep or delete your `~/.config/limon` configuration.
 
 ---
 

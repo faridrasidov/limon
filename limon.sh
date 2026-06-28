@@ -226,6 +226,31 @@ _limon_do_upgrade() {
     fi
 }
 
+# Restore the current shell's prompt and forget Limon state (used by off/uninstall).
+_limon_restore_session() {
+    export PS1="$DEFAULT_PS1"
+    PROMPT_COMMAND="$DEFAULT_PROMPT_COMMAND"
+    unset __LIMON_CMD_START __LIMON_CMD_ELAPSED \
+          __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC \
+          __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
+}
+
+# Run the installer's uninstall flow, then clean up the live shell session.
+_limon_do_uninstall() {
+    local installer="$SCRIPT_DIR/install.sh"
+    if [[ ! -f "$installer" ]]; then
+        echo "limon: installer not found at $installer." >&2
+        echo "limon: remove Limon manually, or re-download install.sh to uninstall." >&2
+        return 1
+    fi
+
+    bash "$installer" --uninstall "$@"
+    local rc=$?
+
+    _limon_restore_session
+    return "$rc"
+}
+
 # --- 3. Subcommand & Config Loading ---
 SUBCOMMAND="${1:-}"
 shift || true
@@ -455,12 +480,11 @@ case "$SUBCOMMAND" in
     upgrade|update)
         _limon_do_upgrade
         ;;
+    uninstall)
+        _limon_do_uninstall "$@"
+        ;;
     off)
-        export PS1="$DEFAULT_PS1"
-        PROMPT_COMMAND="$DEFAULT_PROMPT_COMMAND"
-        unset __LIMON_CMD_START __LIMON_CMD_ELAPSED \
-              __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC \
-              __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
+        _limon_restore_session
         ;;
     reload)
         if ! _limon_is_active; then
@@ -564,6 +588,7 @@ Usage:
     limon off            Restore default prompt
     limon reload         Reload theme and config
     limon upgrade        Update Limon to the latest version (git pull)
+    limon uninstall      Remove Limon (prompts to keep or delete config)
     limon status         Show current state
     limon themes         List available themes
     limon config KEY=VAL Set timer_threshold, git, show_host, show_ssh, or autoupdate
