@@ -84,6 +84,35 @@ limon config show_ssh=1 # Show an [ssh] tag on remote sessions (off by default)
 
 ---
 
+## 🔄 Updating Limon
+
+Limon installs as a small Git repository, so updating to the latest version is built in.
+
+**Update manually (recommended):**
+
+```bash
+limon upgrade
+```
+
+This runs a safe fast-forward `git pull` in your Limon install directory and tells you when it's done. After updating, run `limon on` (or open a new terminal) to load the new version.
+
+> If Limon is installed in a system directory like `/usr/share/limon`, you may need elevated permissions. Limon will detect this and suggest:
+> ```bash
+> sudo git -C /usr/share/limon pull --ff-only
+> ```
+
+**Enable automatic update checks:**
+
+```bash
+limon config autoupdate=notify   # Check once a day, notify you when an update exists
+limon config autoupdate=on        # Check once a day, auto-install updates when possible
+limon config autoupdate=off       # Disable update checks (default)
+```
+
+Update checks are **throttled to once per day** and run **in the background**, so they never slow down your prompt. When an update is available you'll see a short notice the next time you start a shell.
+
+---
+
 ## 🎨 Custom Bash Prompt Themes & Customization
 
 Limon supports massive customization of your bash prompt through simple `.theme` files. Themes are stored in `~/.config/limon/themes/`.
@@ -200,6 +229,9 @@ Yes. Limon runs on Linux, macOS, WSL (Windows Subsystem for Linux), and Git Bash
 
 **How do I show command execution time in the prompt?**
 Limon includes a built-in execution timer that automatically shows how long a command took (by default only when it runs longer than 2 seconds). Adjust it with `limon config timer_threshold=N`.
+
+**How do I update Limon to the latest version?**
+Run `limon upgrade`. Since Limon is installed as a Git repository, this performs a safe fast-forward `git pull` and updates you to the newest release. You can also enable automatic daily update checks with `limon config autoupdate=notify` or `limon config autoupdate=on`.
 
 **How do I remove or disable Limon?**
 Run `limon off` to instantly restore your system's default prompt. To disable it permanently, remove the `limon on` line from your `.bashrc`.

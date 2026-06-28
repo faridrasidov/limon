@@ -8,10 +8,13 @@ _limon_autocomplete() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    local commands="on off reload status themes config colors help"
+    local commands="on off reload upgrade status themes config colors help"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${commands}" -- "${cur}") )
+
+    elif [[ ${COMP_CWORD} -eq 2 && "${prev}" == "config" ]]; then
+        COMPREPLY=( $(compgen -W "timer_threshold= git= show_host= show_ssh= autoupdate=" -- "${cur}") )
 
     elif [[ ${COMP_CWORD} -eq 2 && "${prev}" == "on" ]]; then
         local themes=""

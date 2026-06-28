@@ -38,6 +38,11 @@ LIMON_TIMER_THRESHOLD=2
 LIMON_GIT_MODE=full
 LIMON_SHOW_HOST=1
 LIMON_SHOW_SSH=0
+LIMON_AUTOUPDATE=off
+
+LIMON_UPDATE_STAMP="$LIMON_CONF_DIR/.last_update_check"
+LIMON_UPDATE_FLAG="$LIMON_CONF_DIR/.update_available"
+LIMON_UPDATE_INTERVAL=86400
 
 _limon_theme_dirs() {
     echo "$LIMON_CONF_DIR/themes"
@@ -90,6 +95,7 @@ _limon_load_config() {
     LIMON_GIT_MODE=full
     LIMON_SHOW_HOST=1
     LIMON_SHOW_SSH=0
+    LIMON_AUTOUPDATE=off
 
     if [[ -f "$LIMON_CONF" ]]; then
         read -r -a conf_parts < "$LIMON_CONF"
@@ -99,6 +105,7 @@ _limon_load_config() {
                 -git=*) LIMON_GIT_MODE="${part#*=}" ;;
                 -show_host=*) LIMON_SHOW_HOST="${part#*=}" ;;
                 -show_ssh=*) LIMON_SHOW_SSH="${part#*=}" ;;
+                -autoupdate=*) LIMON_AUTOUPDATE="${part#*=}" ;;
                 -*) ;;
                 *) saved_theme="$part" ;;
             esac
@@ -126,11 +133,97 @@ _limon_conf_flags() {
     [[ "$LIMON_GIT_MODE" != "full" ]] && flags+=("-git=$LIMON_GIT_MODE")
     [[ "$LIMON_SHOW_HOST" != "1" ]] && flags+=("-show_host=$LIMON_SHOW_HOST")
     [[ "$LIMON_SHOW_SSH" != "0" ]] && flags+=("-show_ssh=$LIMON_SHOW_SSH")
+    [[ "$LIMON_AUTOUPDATE" != "off" ]] && flags+=("-autoupdate=$LIMON_AUTOUPDATE")
     printf '%s\n' "${flags[@]}"
 }
 
 _limon_is_active() {
     [[ "${PROMPT_COMMAND:-}" == *"limon_runner"* ]]
+}
+
+# --- Auto-update helpers ---
+_limon_is_git_install() {
+    command -v git >/dev/null 2>&1 && [[ -d "$SCRIPT_DIR/.git" ]]
+}
+
+# Quietly fetch and compare HEAD with upstream. Used in the background.
+# Marks an update as available (or auto-pulls when autoupdate=on).
+_limon_background_update_check() {
+    _limon_is_git_install || return 0
+    git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet 2>/dev/null || return 0
+
+    local local_rev remote_rev
+    local_rev="$(git -C "$SCRIPT_DIR" rev-parse @ 2>/dev/null)" || return 0
+    remote_rev="$(git -C "$SCRIPT_DIR" rev-parse '@{u}' 2>/dev/null)" || return 0
+    [[ -z "$remote_rev" || "$local_rev" == "$remote_rev" ]] && { rm -f "$LIMON_UPDATE_FLAG"; return 0; }
+
+    if [[ "$LIMON_AUTOUPDATE" == "on" && -w "$SCRIPT_DIR/.git" ]]; then
+        if git -C "$SCRIPT_DIR" pull --quiet --ff-only 2>/dev/null; then
+            rm -f "$LIMON_UPDATE_FLAG"
+            return 0
+        fi
+    fi
+    : > "$LIMON_UPDATE_FLAG"
+}
+
+# Called from `limon on`. Shows a pending notice and, if due, spawns a
+# detached background check so the prompt is never delayed.
+_limon_maybe_autoupdate() {
+    [[ "${LIMON_AUTOUPDATE:-off}" == "off" ]] && return 0
+    _limon_is_git_install || return 0
+
+    if [[ -f "$LIMON_UPDATE_FLAG" ]]; then
+        echo "limon: a new version is available. Run 'limon upgrade' to update."
+    fi
+
+    local now last=0
+    now="$(date +%s 2>/dev/null)" || return 0
+    [[ -f "$LIMON_UPDATE_STAMP" ]] && last="$(cat "$LIMON_UPDATE_STAMP" 2>/dev/null || echo 0)"
+    [[ "$last" =~ ^[0-9]+$ ]] || last=0
+    (( now - last < LIMON_UPDATE_INTERVAL )) && return 0
+
+    echo "$now" > "$LIMON_UPDATE_STAMP" 2>/dev/null || true
+    ( _limon_background_update_check ) >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+}
+
+# Manual, foreground updater for `limon upgrade`.
+_limon_do_upgrade() {
+    if ! command -v git >/dev/null 2>&1; then
+        echo "limon: git is required to upgrade." >&2
+        return 1
+    fi
+    if [[ ! -d "$SCRIPT_DIR/.git" ]]; then
+        echo "limon: not a git installation ($SCRIPT_DIR)." >&2
+        echo "limon: reinstall via 'git clone' to enable upgrades." >&2
+        return 1
+    fi
+    if [[ ! -w "$SCRIPT_DIR/.git" ]]; then
+        echo "limon: no write permission for $SCRIPT_DIR." >&2
+        echo "limon: try: sudo git -C \"$SCRIPT_DIR\" pull --ff-only" >&2
+        return 1
+    fi
+
+    echo "limon: checking for updates in $SCRIPT_DIR ..."
+    git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet 2>/dev/null
+
+    local local_rev remote_rev
+    local_rev="$(git -C "$SCRIPT_DIR" rev-parse @ 2>/dev/null)"
+    remote_rev="$(git -C "$SCRIPT_DIR" rev-parse '@{u}' 2>/dev/null)"
+    if [[ -n "$remote_rev" && "$local_rev" == "$remote_rev" ]]; then
+        echo "limon: already up to date."
+        rm -f "$LIMON_UPDATE_FLAG"
+        return 0
+    fi
+
+    if git -C "$SCRIPT_DIR" pull --ff-only; then
+        rm -f "$LIMON_UPDATE_FLAG"
+        echo "limon: updated successfully."
+        echo "limon: run 'limon on' or open a new terminal to load the new version."
+    else
+        echo "limon: update failed (local changes or non-fast-forward history)." >&2
+        return 1
+    fi
 }
 
 # --- 3. Subcommand & Config Loading ---
@@ -153,7 +246,7 @@ if [[ "$SUBCOMMAND" == "on" ]]; then
     fi
 fi
 
-export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH
+export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE
 
 # --- 5. Git Info (single call + short cache) ---
 _limon_git_lite() {
@@ -357,6 +450,10 @@ case "$SUBCOMMAND" in
         LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
         __LIMON_CMD_ELAPSED=0
         limon_runner
+        _limon_maybe_autoupdate
+        ;;
+    upgrade|update)
+        _limon_do_upgrade
         ;;
     off)
         export PS1="$DEFAULT_PS1"
@@ -392,7 +489,13 @@ case "$SUBCOMMAND" in
             echo "Theme file: (built-in defaults)"
         fi
         echo "Config: $LIMON_CONF"
-        echo "Options: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH"
+        echo "Options: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE"
+        if _limon_is_git_install; then
+            echo "Install: $SCRIPT_DIR (git — upgradable)"
+        else
+            echo "Install: $SCRIPT_DIR (not a git install — 'limon upgrade' unavailable)"
+        fi
+        [[ -f "$LIMON_UPDATE_FLAG" ]] && echo "Update: a new version is available (run 'limon upgrade')"
         ;;
     themes)
         listed=0
@@ -412,23 +515,30 @@ case "$SUBCOMMAND" in
     config)
         CONFIG_ARG="${1:-}"
         if [[ -z "$CONFIG_ARG" ]]; then
-            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1"
-            echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH"
+            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on"
+            echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE"
         else
+            config_ok=0
             case "$CONFIG_ARG" in
-                timer_threshold=*) LIMON_TIMER_THRESHOLD="${CONFIG_ARG#*=}" ;;
-                git=*) LIMON_GIT_MODE="${CONFIG_ARG#*=}" ;;
-                show_host=*) LIMON_SHOW_HOST="${CONFIG_ARG#*=}" ;;
-                show_ssh=*) LIMON_SHOW_SSH="${CONFIG_ARG#*=}" ;;
+                timer_threshold=*) LIMON_TIMER_THRESHOLD="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                git=*) LIMON_GIT_MODE="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                show_host=*) LIMON_SHOW_HOST="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                show_ssh=*) LIMON_SHOW_SSH="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                autoupdate=*)
+                    case "${CONFIG_ARG#*=}" in
+                        off|notify|on) LIMON_AUTOUPDATE="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: autoupdate must be one of: off, notify, on" >&2 ;;
+                    esac
+                    ;;
                 *)
                     echo "limon: unknown config option '$CONFIG_ARG'" >&2
-                    echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1" >&2
+                    echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on" >&2
                     ;;
             esac
-            if [[ "$CONFIG_ARG" == timer_threshold=* || "$CONFIG_ARG" == git=* || "$CONFIG_ARG" == show_host=* || "$CONFIG_ARG" == show_ssh=* ]]; then
+            if [[ "$config_ok" -eq 1 ]]; then
                 mapfile -t _limon_flags < <(_limon_conf_flags)
                 _limon_write_config "$saved_theme" "${_limon_flags[@]}"
-                export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH
+                export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE
                 if _limon_is_active; then
                     limon_runner
                 fi
@@ -453,14 +563,20 @@ Usage:
     limon on [theme]     Enable Limon (optionally set theme)
     limon off            Restore default prompt
     limon reload         Reload theme and config
+    limon upgrade        Update Limon to the latest version (git pull)
     limon status         Show current state
     limon themes         List available themes
-    limon config KEY=VAL Set timer_threshold, git, show_host, or show_ssh
+    limon config KEY=VAL Set timer_threshold, git, show_host, show_ssh, or autoupdate
     limon colors         Show ANSI color codes
     limon help           Show this help
 
+Auto-update:
+    limon config autoupdate=off     Never check for updates (default)
+    limon config autoupdate=notify  Check daily, notify when an update exists
+    limon config autoupdate=on       Check daily, auto-install updates if possible
+
 Config file: $LIMON_CONF
-  Example: neon -timer_threshold=3 -git=lite -show_host=1 -show_ssh=1
+  Example: neon -timer_threshold=3 -git=lite -show_host=1 -show_ssh=1 -autoupdate=notify
 "
         ;;
 esac
