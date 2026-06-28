@@ -177,6 +177,31 @@ limon config autoupdate=off       # Disable update checks (default)
 
 Update checks are **throttled to once per day** and run **in the background**, so they never slow down your prompt. When an update is available you'll see a short notice the next time you start a shell.
 
+### Update channels (stable, beta, dev)
+
+Limon tracks one of three branches, so you can choose how new (and how risky) your updates are:
+
+| Channel | Branch | Description |
+|---------|--------|-------------|
+| `stable` | `master` | Tested, recommended for everyday use (**default**) |
+| `beta` | `beta` | Newest features, **may be unstable** |
+| `dev` | `dev` | Active development, expect breakage |
+
+```bash
+limon upgrade           # Update on your current channel
+limon upgrade beta      # Switch to the beta channel and update
+limon upgrade stable    # Switch back to the stable channel and update
+limon upgrade dev       # Switch to the bleeding-edge dev channel and update
+```
+
+Switching channels is remembered, so future `limon upgrade` runs (and the auto-update checks) stay on the channel you chose. To change the channel **without** upgrading right away:
+
+```bash
+limon config channel=beta   # Next 'limon upgrade' will move you to beta
+```
+
+`limon status` shows your current channel and the git branch it maps to. To return to stable releases at any time, run `limon upgrade stable`.
+
 ---
 
 ## 🎨 Custom Bash Prompt Themes & Customization
@@ -311,7 +336,10 @@ Yes. Limon runs on Linux, macOS, WSL (Windows Subsystem for Linux), and Git Bash
 Limon includes a built-in execution timer that automatically shows how long a command took (by default only when it runs longer than 2 seconds). Adjust it with `limon config timer_threshold=N`.
 
 **How do I update Limon to the latest version?**
-Run `limon upgrade`. Since Limon is installed as a Git repository, this performs a safe fast-forward `git pull` and updates you to the newest release. You can also enable automatic daily update checks with `limon config autoupdate=notify` or `limon config autoupdate=on`.
+Run `limon upgrade`. Since Limon is installed as a Git repository, this performs a safe fast-forward update from the channel you're on (stable by default). You can also enable automatic daily update checks with `limon config autoupdate=notify` or `limon config autoupdate=on`.
+
+**How do I try beta/development features?**
+Limon has three update channels mapped to git branches: `stable` (master), `beta` (newest features, may be unstable), and `dev` (bleeding edge). Run `limon upgrade beta` to switch to and update on the beta channel, or `limon upgrade stable` to switch back. The choice is remembered for future updates.
 
 **How do I remove or disable Limon?**
 To temporarily disable it, run `limon off` to instantly restore your system's default prompt. To uninstall it completely, run `limon uninstall` (or `./install.sh --uninstall`) — it removes the startup entries and installed files, and asks whether to keep or delete your `~/.config/limon` configuration.

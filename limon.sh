@@ -52,6 +52,7 @@ LIMON_GIT_MODE=full
 LIMON_SHOW_HOST=1
 LIMON_SHOW_SSH=0
 LIMON_AUTOUPDATE=off
+LIMON_CHANNEL=stable
 LIMON_ASCII=0
 LIMON_MAX_PATH=0
 LIMON_HOST_COLOR=auto
@@ -120,6 +121,7 @@ _limon_load_config() {
     LIMON_SHOW_HOST=1
     LIMON_SHOW_SSH=0
     LIMON_AUTOUPDATE=off
+    LIMON_CHANNEL=stable
     LIMON_ASCII=0
     LIMON_MAX_PATH=0
     LIMON_HOST_COLOR=auto
@@ -141,6 +143,7 @@ _limon_load_config() {
                 -show_host=*) LIMON_SHOW_HOST="${part#*=}" ;;
                 -show_ssh=*) LIMON_SHOW_SSH="${part#*=}" ;;
                 -autoupdate=*) LIMON_AUTOUPDATE="${part#*=}" ;;
+                -channel=*) LIMON_CHANNEL="${part#*=}" ;;
                 -ascii=*) LIMON_ASCII="${part#*=}" ;;
                 -max_path=*) LIMON_MAX_PATH="${part#*=}" ;;
                 -host_color=*) LIMON_HOST_COLOR="${part#*=}" ;;
@@ -180,6 +183,7 @@ _limon_conf_flags() {
     [[ "$LIMON_SHOW_HOST" != "1" ]] && flags+=("-show_host=$LIMON_SHOW_HOST")
     [[ "$LIMON_SHOW_SSH" != "0" ]] && flags+=("-show_ssh=$LIMON_SHOW_SSH")
     [[ "$LIMON_AUTOUPDATE" != "off" ]] && flags+=("-autoupdate=$LIMON_AUTOUPDATE")
+    [[ "$LIMON_CHANNEL" != "stable" ]] && flags+=("-channel=$LIMON_CHANNEL")
     [[ "$LIMON_ASCII" != "0" ]] && flags+=("-ascii=$LIMON_ASCII")
     [[ "$LIMON_MAX_PATH" != "0" ]] && flags+=("-max_path=$LIMON_MAX_PATH")
     [[ "$LIMON_HOST_COLOR" != "auto" ]] && flags+=("-host_color=$LIMON_HOST_COLOR")
@@ -609,20 +613,44 @@ _limon_git_prepare_repo() {
     git -C "$SCRIPT_DIR" config core.fileMode false 2>/dev/null || true
 }
 
-# Quietly fetch and compare HEAD with upstream. Used in the background.
-# Marks an update as available (or auto-pulls when autoupdate=on).
+# Map an update channel name to its git branch. Prints nothing for unknown names.
+#   stable -> master   (tested, recommended)
+#   beta   -> beta     (newest features, may be unstable)
+#   dev    -> dev      (active development, expect breakage)
+_limon_channel_branch() {
+    case "$1" in
+        stable) echo "master" ;;
+        beta)   echo "beta" ;;
+        dev)    echo "dev" ;;
+        *)      return 1 ;;
+    esac
+}
+
+# Quietly fetch and compare against the channel branch. Used in the background.
+# Marks an update as available (or auto-pulls when autoupdate=on and on-branch).
 _limon_background_update_check() {
     _limon_is_git_install || return 0
     _limon_git_prepare_repo
-    git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet 2>/dev/null || return 0
 
-    local local_rev remote_rev
+    local branch
+    branch="$(_limon_channel_branch "${LIMON_CHANNEL:-stable}")" || branch="master"
+
+    git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet origin 2>/dev/null || return 0
+
+    local current_branch local_rev remote_rev
+    current_branch="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 0
+    remote_rev="$(git -C "$SCRIPT_DIR" rev-parse "origin/$branch" 2>/dev/null)" || return 0
     local_rev="$(git -C "$SCRIPT_DIR" rev-parse @ 2>/dev/null)" || return 0
-    remote_rev="$(git -C "$SCRIPT_DIR" rev-parse '@{u}' 2>/dev/null)" || return 0
+
+    # On a different branch than the configured channel: a switch is available.
+    if [[ "$current_branch" != "$branch" ]]; then
+        : > "$LIMON_UPDATE_FLAG"
+        return 0
+    fi
     [[ -z "$remote_rev" || "$local_rev" == "$remote_rev" ]] && { rm -f "$LIMON_UPDATE_FLAG"; return 0; }
 
     if [[ "$LIMON_AUTOUPDATE" == "on" && -w "$SCRIPT_DIR/.git" ]]; then
-        if git -C "$SCRIPT_DIR" pull --quiet --ff-only 2>/dev/null; then
+        if git -C "$SCRIPT_DIR" merge --quiet --ff-only "origin/$branch" 2>/dev/null; then
             rm -f "$LIMON_UPDATE_FLAG"
             return 0
         fi
@@ -665,8 +693,20 @@ _limon_load_hints() {
     [[ -f "$hint" ]] && source "$hint"
 }
 
-# Manual, foreground updater for `limon upgrade`.
+# Persist the chosen channel to the config file (keeps theme + other flags intact).
+_limon_save_channel() {
+    LIMON_CHANNEL="$1"
+    local _flags
+    mapfile -t _flags < <(_limon_conf_flags)
+    _limon_write_config "$saved_theme" "${_flags[@]}"
+    export LIMON_CHANNEL
+}
+
+# Manual, foreground updater for `limon upgrade [stable|beta|dev]`.
+# With no argument it updates on the currently configured channel.
 _limon_do_upgrade() {
+    local requested_channel="${1:-}"
+
     if ! command -v git >/dev/null 2>&1; then
         echo "limon: git is required to upgrade." >&2
         return 1
@@ -684,29 +724,70 @@ _limon_do_upgrade() {
         return 1
     fi
 
+    # Resolve which channel/branch to upgrade to.
+    local channel="${LIMON_CHANNEL:-stable}"
+    [[ -n "$requested_channel" ]] && channel="$requested_channel"
+
+    local branch
+    if ! branch="$(_limon_channel_branch "$channel")"; then
+        echo "limon: unknown channel '$channel' (use: stable, beta, dev)." >&2
+        return 1
+    fi
+
+    # Persist the channel if the user explicitly switched it.
+    if [[ -n "$requested_channel" && "$requested_channel" != "${LIMON_CHANNEL:-stable}" ]]; then
+        _limon_save_channel "$requested_channel"
+        echo "limon: switched update channel to '$channel'."
+    fi
+
     # Ignore executable-bit changes so a user's `chmod +x install.sh` (or similar)
     # doesn't register as a local modification that blocks a fast-forward pull.
     _limon_git_prepare_repo
 
-    echo "limon: checking for updates in $SCRIPT_DIR ..."
-    git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet 2>/dev/null
+    echo "limon: channel '$channel' (branch '$branch') — checking $SCRIPT_DIR ..."
+    if ! git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet origin 2>/dev/null; then
+        echo "limon: failed to fetch from 'origin'." >&2
+        return 1
+    fi
+
+    if ! git -C "$SCRIPT_DIR" rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1; then
+        echo "limon: remote branch 'origin/$branch' not found." >&2
+        return 1
+    fi
+
+    # Switch to the channel branch if we're not already on it.
+    local current_branch
+    current_branch="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    if [[ "$current_branch" != "$branch" ]]; then
+        echo "limon: switching branch '$current_branch' -> '$branch' ..."
+        if ! git -C "$SCRIPT_DIR" checkout "$branch" >/dev/null 2>&1 && \
+           ! git -C "$SCRIPT_DIR" checkout -b "$branch" --track "origin/$branch" >/dev/null 2>&1; then
+            echo "limon: could not switch to branch '$branch'." >&2
+            echo "limon: you may have local changes — check: git -C \"$SCRIPT_DIR\" status" >&2
+            return 1
+        fi
+    fi
 
     local local_rev remote_rev
     local_rev="$(git -C "$SCRIPT_DIR" rev-parse @ 2>/dev/null)"
-    remote_rev="$(git -C "$SCRIPT_DIR" rev-parse '@{u}' 2>/dev/null)"
+    remote_rev="$(git -C "$SCRIPT_DIR" rev-parse "origin/$branch" 2>/dev/null)"
     if [[ -n "$remote_rev" && "$local_rev" == "$remote_rev" ]]; then
-        echo "limon: already up to date."
+        echo "limon: already up to date on '$channel'."
         rm -f "$LIMON_UPDATE_FLAG"
         return 0
     fi
 
-    if git -C "$SCRIPT_DIR" pull --ff-only; then
+    if git -C "$SCRIPT_DIR" merge --ff-only "origin/$branch"; then
         rm -f "$LIMON_UPDATE_FLAG"
         _limon_load_hints force
-        echo "limon: updated successfully (tab-completion reloaded)."
+        echo "limon: updated to the latest '$channel' (tab-completion reloaded)."
         echo "limon: run 'limon on' or open a new terminal to load the new prompt code."
+        if [[ "$channel" != "stable" ]]; then
+            echo "limon: note: '$channel' may be unstable. Switch back with: limon upgrade stable"
+        fi
     else
         echo "limon: update failed (local changes or non-fast-forward history)." >&2
+        echo "limon: inspect with: git -C \"$SCRIPT_DIR\" status" >&2
         return 1
     fi
 }
@@ -862,7 +943,7 @@ if [[ "$SUBCOMMAND" == "on" ]]; then
 fi
 
 export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
-       LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
+       LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
        LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK
 
 # --- 5. Git Info (single call + short cache) ---
@@ -1174,7 +1255,14 @@ limon_runner() {
 }
 export -f limon_runner
 
-export LIMON_THEME_ARG="$THEME_NAME"
+# Only 'limon on' changes the live theme. Other subcommands (status, config,
+# upgrade, etc.) must preserve the currently active theme so their argument
+# (e.g. a channel name or config key) doesn't leak into the prompt renderer.
+if [[ "$SUBCOMMAND" == "on" ]]; then
+    export LIMON_THEME_ARG="$THEME_NAME"
+else
+    export LIMON_THEME_ARG="${LIMON_THEME_ARG:-$saved_theme}"
+fi
 
 case "$SUBCOMMAND" in
     on)
@@ -1187,7 +1275,7 @@ case "$SUBCOMMAND" in
         _limon_maybe_autoupdate
         ;;
     upgrade|update)
-        _limon_do_upgrade
+        _limon_do_upgrade "${1:-}"
         ;;
     uninstall)
         _limon_do_uninstall "$@"
@@ -1204,7 +1292,7 @@ case "$SUBCOMMAND" in
                   __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
             _limon_load_config
             export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
-                   LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
+                   LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
                    LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK
             export LIMON_THEME_ARG="$saved_theme"
             LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
@@ -1237,9 +1325,12 @@ case "$SUBCOMMAND" in
             echo "Rendering: color=off term=${TERM:-unknown}"
         fi
         if _limon_is_git_install; then
+            status_branch="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
             echo "Install: $SCRIPT_DIR (git — upgradable)"
+            echo "Channel: $LIMON_CHANNEL (branch: $status_branch)"
         else
             echo "Install: $SCRIPT_DIR (not a git install — 'limon upgrade' unavailable)"
+            echo "Channel: $LIMON_CHANNEL (not a git install)"
         fi
         if [[ -f "$LIMON_UPDATE_FLAG" ]]; then
             echo "Update: a new version is available (run 'limon upgrade')"
@@ -1295,6 +1386,12 @@ case "$SUBCOMMAND" in
                     case "${CONFIG_ARG#*=}" in
                         off|notify|on) LIMON_AUTOUPDATE="${CONFIG_ARG#*=}"; config_ok=1 ;;
                         *) echo "limon: autoupdate must be one of: off, notify, on" >&2 ;;
+                    esac
+                    ;;
+                channel=*)
+                    case "${CONFIG_ARG#*=}" in
+                        stable|beta|dev) LIMON_CHANNEL="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: channel must be one of: stable, beta, dev" >&2 ;;
                     esac
                     ;;
                 ascii=*)
@@ -1381,7 +1478,7 @@ case "$SUBCOMMAND" in
                 mapfile -t _limon_flags < <(_limon_conf_flags)
                 _limon_write_config "$saved_theme" "${_limon_flags[@]}"
                 export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
-                       LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
+                       LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
                        LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK
                 if _limon_is_active; then
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
@@ -1419,7 +1516,7 @@ Usage:
     limon on [theme]     Enable Limon (optionally set theme)
     limon off            Restore default prompt
     limon reload         Reload theme and config
-    limon upgrade        Update Limon to the latest version (git pull)
+    limon upgrade [chan] Update Limon (optionally switch channel: stable|beta|dev)
     limon uninstall      Remove Limon (prompts to keep or delete config)
     limon status         Show current state
     limon health         Run install and prompt diagnostics
@@ -1435,6 +1532,13 @@ Auto-update:
     limon config autoupdate=off     Never check for updates (default)
     limon config autoupdate=notify  Check daily, notify when an update exists
     limon config autoupdate=on       Check daily, auto-install updates if possible
+
+Update channels (which branch upgrades track):
+    limon upgrade               Update on the current channel
+    limon upgrade stable        Switch to stable (branch: master) and update [default]
+    limon upgrade beta          Switch to beta (newest features, may be unstable)
+    limon upgrade dev           Switch to dev (active development, expect breakage)
+    limon config channel=beta   Set the channel without upgrading right now
 
 Safe rendering:
     limon config ascii=1            Use ASCII symbols (# > ^ v) instead of Unicode

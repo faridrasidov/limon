@@ -25,7 +25,10 @@ _limon_autocomplete() {
         COMPREPLY=( $(compgen -W "${commands}" -- "${cur}") )
 
     elif [[ ${COMP_CWORD} -eq 2 && "${prev}" == "config" ]]; then
-        COMPREPLY=( $(compgen -W "timer_threshold= git= show_host= show_ssh= autoupdate= ascii= max_path= host_color= env_banner= show_root= show_sudo= k8s= cloud= show_exit= exit_hints= clock=" -- "${cur}") )
+        COMPREPLY=( $(compgen -W "timer_threshold= git= show_host= show_ssh= autoupdate= channel= ascii= max_path= host_color= env_banner= show_root= show_sudo= k8s= cloud= show_exit= exit_hints= clock=" -- "${cur}") )
+
+    elif [[ ${COMP_CWORD} -eq 2 && ( "${prev}" == "upgrade" || "${prev}" == "update" ) ]]; then
+        COMPREPLY=( $(compgen -W "stable beta dev" -- "${cur}") )
 
     elif [[ ${COMP_CWORD} -eq 2 && ( "${prev}" == "on" || "${prev}" == "preview" || "${prev}" == "edit" ) ]]; then
         local themes=""
