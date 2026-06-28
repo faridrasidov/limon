@@ -54,6 +54,12 @@ LIMON_SHOW_SSH=0
 LIMON_AUTOUPDATE=off
 LIMON_ASCII=0
 LIMON_MAX_PATH=0
+LIMON_HOST_COLOR=auto
+LIMON_ENV_BANNER=0
+LIMON_SHOW_ROOT=1
+LIMON_SHOW_SUDO=1
+LIMON_K8S=0
+LIMON_CLOUD=0
 
 LIMON_UPDATE_STAMP="$LIMON_CONF_DIR/.last_update_check"
 LIMON_UPDATE_FLAG="$LIMON_CONF_DIR/.update_available"
@@ -113,6 +119,12 @@ _limon_load_config() {
     LIMON_AUTOUPDATE=off
     LIMON_ASCII=0
     LIMON_MAX_PATH=0
+    LIMON_HOST_COLOR=auto
+    LIMON_ENV_BANNER=0
+    LIMON_SHOW_ROOT=1
+    LIMON_SHOW_SUDO=1
+    LIMON_K8S=0
+    LIMON_CLOUD=0
 
     if [[ -f "$LIMON_CONF" ]]; then
         read -r -a conf_parts < "$LIMON_CONF"
@@ -125,6 +137,12 @@ _limon_load_config() {
                 -autoupdate=*) LIMON_AUTOUPDATE="${part#*=}" ;;
                 -ascii=*) LIMON_ASCII="${part#*=}" ;;
                 -max_path=*) LIMON_MAX_PATH="${part#*=}" ;;
+                -host_color=*) LIMON_HOST_COLOR="${part#*=}" ;;
+                -env_banner=*) LIMON_ENV_BANNER="${part#*=}" ;;
+                -show_root=*) LIMON_SHOW_ROOT="${part#*=}" ;;
+                -show_sudo=*) LIMON_SHOW_SUDO="${part#*=}" ;;
+                -k8s=*) LIMON_K8S="${part#*=}" ;;
+                -cloud=*) LIMON_CLOUD="${part#*=}" ;;
                 -*) ;;
                 *) saved_theme="$part" ;;
             esac
@@ -155,6 +173,12 @@ _limon_conf_flags() {
     [[ "$LIMON_AUTOUPDATE" != "off" ]] && flags+=("-autoupdate=$LIMON_AUTOUPDATE")
     [[ "$LIMON_ASCII" != "0" ]] && flags+=("-ascii=$LIMON_ASCII")
     [[ "$LIMON_MAX_PATH" != "0" ]] && flags+=("-max_path=$LIMON_MAX_PATH")
+    [[ "$LIMON_HOST_COLOR" != "auto" ]] && flags+=("-host_color=$LIMON_HOST_COLOR")
+    [[ "$LIMON_ENV_BANNER" != "0" ]] && flags+=("-env_banner=$LIMON_ENV_BANNER")
+    [[ "$LIMON_SHOW_ROOT" != "1" ]] && flags+=("-show_root=$LIMON_SHOW_ROOT")
+    [[ "$LIMON_SHOW_SUDO" != "1" ]] && flags+=("-show_sudo=$LIMON_SHOW_SUDO")
+    [[ "$LIMON_K8S" != "0" ]] && flags+=("-k8s=$LIMON_K8S")
+    [[ "$LIMON_CLOUD" != "0" ]] && flags+=("-cloud=$LIMON_CLOUD")
     printf '%s\n' "${flags[@]}"
 }
 
@@ -190,11 +214,13 @@ _limon_init_symbols() {
         __LIMON_SYM_ARROW=">"
         __LIMON_SYM_UP="^"
         __LIMON_SYM_DOWN="v"
+        __LIMON_SYM_WARN="!"
     else
         __LIMON_SYM_LOCK=" 🔒"
         __LIMON_SYM_ARROW="➜ "
         __LIMON_SYM_UP="↑"
         __LIMON_SYM_DOWN="↓"
+        __LIMON_SYM_WARN="⚠"
     fi
 }
 
@@ -205,7 +231,109 @@ _limon_ascii_text() {
     s="${s//➜ /$__LIMON_SYM_ARROW}"
     s="${s//➜/$__LIMON_SYM_ARROW}"
     s="${s//🔒/$__LIMON_SYM_LOCK}"
+    s="${s//⚠/$__LIMON_SYM_WARN}"
     echo "$s"
+}
+
+# --- Phase 6: Identity & safety helpers ---
+_limon_host_color_code() {
+    local mode="${LIMON_HOST_COLOR:-auto}"
+    local host="${HOSTNAME:-$(hostname 2>/dev/null)}"
+
+    if [[ "$mode" == "off" || "$mode" == "0" ]]; then
+        return 1
+    fi
+
+    if [[ "$mode" == "auto" ]]; then
+        local hash=0 i c
+        for ((i = 0; i < ${#host}; i++)); do
+            c=$(printf '%d' "'${host:$i:1}")
+            hash=$(( (hash * 31 + c) % 216 ))
+        done
+        echo $(( 32 + hash % 200 ))
+        return 0
+    fi
+
+    if [[ "$mode" =~ ^[0-9]+$ ]]; then
+        echo "$mode"
+        return 0
+    fi
+
+    return 1
+}
+
+_limon_has_sudo_ticket() {
+    [[ "${LIMON_SHOW_SUDO:-1}" != "1" ]] && return 1
+    [[ "${EUID}" -eq 0 ]] && return 1
+    local ts
+    for ts in "/run/sudo/ts/$(id -u 2>/dev/null)" "/var/db/sudo/ts/$(id -u 2>/dev/null)"; do
+        [[ -f "$ts" ]] && return 0
+    done
+    return 1
+}
+
+_limon_k8s_label() {
+    [[ "${LIMON_K8S:-0}" != "1" ]] && return 1
+
+    if [[ -n "${KUBE_PS1_CONTEXT:-}" ]]; then
+        echo "(k8s:$KUBE_PS1_CONTEXT)"
+        return 0
+    fi
+
+    if [[ $((SECONDS - ${__LIMON_K8S_CACHE_SEC:-0})) -lt 2 && -n "${__LIMON_K8S_CACHE_CTX:-}" ]]; then
+        echo "(k8s:$__LIMON_K8S_CACHE_CTX)"
+        return 0
+    fi
+
+    if ! command -v kubectl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local ctx
+    ctx="$(kubectl config current-context 2>/dev/null)" || return 1
+    __LIMON_K8S_CACHE_CTX="$ctx"
+    __LIMON_K8S_CACHE_SEC=$SECONDS
+    echo "(k8s:$ctx)"
+}
+
+_limon_safety_prefix() {
+    local c_reset="$1"
+    local col_err="$2"
+    local prefix=""
+
+    if [[ "${EUID}" -eq 0 && "${LIMON_SHOW_ROOT:-1}" == "1" ]]; then
+        prefix+="${col_err}[${__LIMON_SYM_WARN} ROOT]${c_reset} "
+    fi
+
+    if [[ "${LIMON_ENV_BANNER:-0}" == "1" && -n "${LIMON_ENV:-}" ]]; then
+        local env_label="${LIMON_ENV^^}"
+        local col_banner='\[\e[38;5;244m\]'
+        case "${LIMON_ENV,,}" in
+            prod|production) col_banner='\[\e[38;5;196m\]' ;;
+            staging|stage) col_banner='\[\e[38;5;226m\]' ;;
+            dev|development) col_banner='\[\e[38;5;39m\]' ;;
+        esac
+        if [[ -z "$c_reset" ]]; then
+            col_banner=''
+        fi
+        prefix+="${col_banner}[${__LIMON_SYM_WARN} ${env_label}]${c_reset} "
+    fi
+
+    if _limon_has_sudo_ticket; then
+        prefix+="${c_reset}(sudo) "
+    fi
+
+    if [[ "${LIMON_CLOUD:-0}" == "1" && -n "${AWS_PROFILE:-}" ]]; then
+        prefix+="${c_reset}(aws:$AWS_PROFILE) "
+    fi
+
+    local k8s_label
+    k8s_label="$(_limon_k8s_label 2>/dev/null || true)"
+    if [[ -n "$k8s_label" ]]; then
+        prefix+="${c_reset}${k8s_label} "
+    fi
+
+    echo -n "$prefix"
 }
 
 _limon_display_path() {
@@ -397,7 +525,9 @@ if [[ "$SUBCOMMAND" == "on" ]]; then
     fi
 fi
 
-export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE LIMON_ASCII LIMON_MAX_PATH
+export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
+       LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
+       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD
 
 # --- 5. Git Info (single call + short cache) ---
 _limon_git_lite() {
@@ -515,6 +645,16 @@ main() {
         theme_symbol_prefix="$(_limon_ascii_text "$theme_symbol_prefix")"
     fi
 
+    local host_color_code
+    if _limon_use_color; then
+        if host_color_code="$(_limon_host_color_code 2>/dev/null)"; then
+            col_host='\[\e[38;5;'${host_color_code}'m\]'
+        fi
+    fi
+
+    local safety_str
+    safety_str="$(_limon_safety_prefix "$c_reset" "$col_err")"
+
     local elapsed_str=""
     if [[ ${__LIMON_CMD_ELAPSED:-0} -ge ${LIMON_TIMER_THRESHOLD:-2} ]]; then
         local elapsed=$__LIMON_CMD_ELAPSED
@@ -597,15 +737,15 @@ main() {
     local ps1=""
     if [[ "$theme_multiline" -eq 1 ]]; then
         if [[ -n "$host_str" ]]; then
-            ps1="$venv_str$host_str $dir_str$git_str$time_display$jobs_str\n$symbol_str"
+            ps1="$safety_str$venv_str$host_str $dir_str$git_str$time_display$jobs_str\n$symbol_str"
         else
-            ps1="$venv_str$dir_str$git_str$time_display$jobs_str\n$symbol_str"
+            ps1="$safety_str$venv_str$dir_str$git_str$time_display$jobs_str\n$symbol_str"
         fi
     else
         if [[ -n "$host_str" ]]; then
-            ps1="$venv_str$host_str$theme_separator$dir_str$git_str$time_display$jobs_str$symbol_str"
+            ps1="$safety_str$venv_str$host_str$theme_separator$dir_str$git_str$time_display$jobs_str$symbol_str"
         else
-            ps1="$venv_str$dir_str$git_str$time_display$jobs_str$symbol_str"
+            ps1="$safety_str$venv_str$dir_str$git_str$time_display$jobs_str$symbol_str"
         fi
     fi
 
@@ -658,7 +798,9 @@ case "$SUBCOMMAND" in
             unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                   __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
             _limon_load_config
-            export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE LIMON_ASCII LIMON_MAX_PATH
+            export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
+                   LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
+                   LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD
             export LIMON_THEME_ARG="$saved_theme"
             LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
             limon_runner
@@ -680,6 +822,10 @@ case "$SUBCOMMAND" in
         fi
         echo "Config: $LIMON_CONF"
         echo "Options: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
+        echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD"
+        if [[ -n "${LIMON_ENV:-}" ]]; then
+            echo "Environment: LIMON_ENV=$LIMON_ENV"
+        fi
         if _limon_use_color; then
             echo "Rendering: color=on term=${TERM:-unknown}"
         else
@@ -712,8 +858,9 @@ case "$SUBCOMMAND" in
     config)
         CONFIG_ARG="${1:-}"
         if [[ -z "$CONFIG_ARG" ]]; then
-            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|ascii=0|1|max_path=N"
+            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1"
             echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
+            echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD"
         else
             config_ok=0
             case "$CONFIG_ARG" in
@@ -741,15 +888,60 @@ case "$SUBCOMMAND" in
                         echo "limon: max_path must be a non-negative integer" >&2
                     fi
                     ;;
+                host_color=*)
+                    case "${CONFIG_ARG#*=}" in
+                        auto|off) LIMON_HOST_COLOR="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *)
+                            if [[ "${CONFIG_ARG#*=}" =~ ^[0-9]+$ && "${CONFIG_ARG#*=}" -le 255 ]]; then
+                                LIMON_HOST_COLOR="${CONFIG_ARG#*=}"
+                                config_ok=1
+                            else
+                                echo "limon: host_color must be auto, off, or 0-255" >&2
+                            fi
+                            ;;
+                    esac
+                    ;;
+                env_banner=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_ENV_BANNER="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: env_banner must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
+                show_root=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_SHOW_ROOT="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: show_root must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
+                show_sudo=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_SHOW_SUDO="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: show_sudo must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
+                k8s=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_K8S="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: k8s must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
+                cloud=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_CLOUD="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: cloud must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
                 *)
                     echo "limon: unknown config option '$CONFIG_ARG'" >&2
-                    echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|ascii=0|1|max_path=N" >&2
+                    echo "Usage: limon config ... host_color=auto|off|N env_banner=0|1 show_root=0|1 show_sudo=0|1 k8s=0|1 cloud=0|1" >&2
                     ;;
             esac
             if [[ "$config_ok" -eq 1 ]]; then
                 mapfile -t _limon_flags < <(_limon_conf_flags)
                 _limon_write_config "$saved_theme" "${_limon_flags[@]}"
-                export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE LIMON_ASCII LIMON_MAX_PATH
+                export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
+                       LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
+                       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD
                 if _limon_is_active; then
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                           __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
@@ -789,7 +981,7 @@ Usage:
     limon uninstall      Remove Limon (prompts to keep or delete config)
     limon status         Show current state
     limon themes         List available themes
-    limon config KEY=VAL Set timer_threshold, git, show_host, show_ssh, autoupdate, ascii, or max_path
+    limon config KEY=VAL Set timer, git, host, safety, and rendering options
     limon colors         Show ANSI color codes
     limon version        Show the installed Limon version
     limon help           Show this help
@@ -805,8 +997,18 @@ Safe rendering:
     theme_max_path=N                Per-theme path limit in .theme files
     Colors auto-disable when TERM=dumb or output is not a TTY
 
+Identity & safety:
+    limon config host_color=auto    Hash hostname to a distinct color (default)
+    limon config host_color=off     Use theme host color instead
+    export LIMON_ENV=prod           Set environment label (prod/staging/dev)
+    limon config env_banner=1       Show colored PROD/STAGING banner when LIMON_ENV is set
+    limon config show_root=1        Show ROOT warning when running as root (default)
+    limon config show_sudo=1        Show (sudo) when cached sudo credentials exist (default)
+    limon config cloud=1            Show AWS_PROFILE when set
+    limon config k8s=1              Show kubectl current-context (cached 2s)
+
 Config file: $LIMON_CONF
-  Example: neon -timer_threshold=3 -git=lite -ascii=1 -max_path=40 -autoupdate=notify
+  Example: neon -env_banner=1 -host_color=auto -cloud=1 -k8s=1
 "
         ;;
 esac

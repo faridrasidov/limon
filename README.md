@@ -129,9 +129,15 @@ limon config timer_threshold=3
 limon config show_ssh=1 # Show an [ssh] tag on remote sessions (off by default)
 limon config ascii=1    # Use ASCII symbols (# > ^ v) for dumb terminals
 limon config max_path=40 # Truncate long paths (e.g. ~/…/project/src)
+limon config env_banner=1 # Show PROD/STAGING banner when LIMON_ENV is set
+limon config cloud=1    # Show AWS_PROFILE in the prompt
+limon config k8s=1      # Show kubectl context (cached 2s)
+export LIMON_ENV=prod   # Label this shell as production (use with env_banner=1)
 ```
 
 Colors automatically disable when `TERM=dumb` or output is not a TTY (safe for logs and `script`).
+
+**Identity & safety:** `host_color=auto` (default) gives each hostname a distinct color. `show_root` and `show_sudo` warn when running as root or when sudo credentials are cached.
 
 *(Note: Limon remembers your last used theme automatically!)*
 
