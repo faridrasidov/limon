@@ -19,15 +19,15 @@ _limon_autocomplete() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    local commands="on off reload upgrade uninstall status health themes config colors version help"
+    local commands="on off reload upgrade uninstall status health themes edit preview config colors version help"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${commands}" -- "${cur}") )
 
     elif [[ ${COMP_CWORD} -eq 2 && "${prev}" == "config" ]]; then
-        COMPREPLY=( $(compgen -W "timer_threshold= git= show_host= show_ssh= autoupdate=" -- "${cur}") )
+        COMPREPLY=( $(compgen -W "timer_threshold= git= show_host= show_ssh= autoupdate= ascii= max_path= host_color= env_banner= show_root= show_sudo= k8s= cloud= show_exit= exit_hints= clock=" -- "${cur}") )
 
-    elif [[ ${COMP_CWORD} -eq 2 && "${prev}" == "on" ]]; then
+    elif [[ ${COMP_CWORD} -eq 2 && ( "${prev}" == "on" || "${prev}" == "preview" || "${prev}" == "edit" ) ]]; then
         local themes=""
         local theme_dirs=(
             "${XDG_CONFIG_HOME:-$HOME/.config}/limon/themes"

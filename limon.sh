@@ -62,6 +62,7 @@ LIMON_K8S=0
 LIMON_CLOUD=0
 LIMON_SHOW_EXIT=0
 LIMON_EXIT_HINTS=0
+LIMON_SHOW_CLOCK=0
 
 LIMON_UPDATE_STAMP="$LIMON_CONF_DIR/.last_update_check"
 LIMON_UPDATE_FLAG="$LIMON_CONF_DIR/.update_available"
@@ -129,6 +130,7 @@ _limon_load_config() {
     LIMON_CLOUD=0
     LIMON_SHOW_EXIT=0
     LIMON_EXIT_HINTS=0
+    LIMON_SHOW_CLOCK=0
 
     if [[ -f "$LIMON_CONF" ]]; then
         read -r -a conf_parts < "$LIMON_CONF"
@@ -149,6 +151,7 @@ _limon_load_config() {
                 -cloud=*) LIMON_CLOUD="${part#*=}" ;;
                 -show_exit=*) LIMON_SHOW_EXIT="${part#*=}" ;;
                 -exit_hints=*) LIMON_EXIT_HINTS="${part#*=}" ;;
+                -clock=*) LIMON_SHOW_CLOCK="${part#*=}" ;;
                 -*) ;;
                 *) saved_theme="$part" ;;
             esac
@@ -187,6 +190,7 @@ _limon_conf_flags() {
     [[ "$LIMON_CLOUD" != "0" ]] && flags+=("-cloud=$LIMON_CLOUD")
     [[ "$LIMON_SHOW_EXIT" != "0" ]] && flags+=("-show_exit=$LIMON_SHOW_EXIT")
     [[ "$LIMON_EXIT_HINTS" != "0" ]] && flags+=("-exit_hints=$LIMON_EXIT_HINTS")
+    [[ "$LIMON_SHOW_CLOCK" != "0" ]] && flags+=("-clock=$LIMON_SHOW_CLOCK")
     printf '%s\n' "${flags[@]}"
 }
 
@@ -707,6 +711,106 @@ _limon_do_upgrade() {
     fi
 }
 
+# --- Phase 10: UX helpers ---
+_limon_user_theme_path() {
+    local theme_name="$1"
+    echo "$LIMON_CONF_DIR/themes/${theme_name}.theme"
+}
+
+_limon_write_theme_template() {
+    local theme_file="$1"
+    cat > "$theme_file" <<'EOF'
+# Limon Theme Template
+
+col_ok='\[\e[38;5;44m\]'
+col_err='\[\e[38;5;196m\]'
+col_git='\[\e[38;5;214m\]'
+col_dir='\[\e[38;5;39m\]'
+col_host='\[\e[38;5;118m\]'
+col_time='\[\e[38;5;242m\]'
+
+theme_multiline=0
+theme_separator=":"
+theme_symbol_prefix=""
+theme_max_path=0
+EOF
+}
+
+_limon_ensure_user_theme() {
+    local theme_name="$1"
+    local user_file resolved
+    user_file="$(_limon_user_theme_path "$theme_name")"
+    mkdir -p "$LIMON_CONF_DIR/themes"
+
+    if [[ -f "$user_file" ]]; then
+        echo "$user_file"
+        return 0
+    fi
+
+    resolved="$(_limon_resolve_theme_file "$theme_name" 2>/dev/null || true)"
+    if [[ -n "$resolved" && "$resolved" != "$user_file" ]]; then
+        cp "$resolved" "$user_file"
+        echo "$user_file"
+        return 0
+    fi
+
+    _limon_write_theme_template "$user_file"
+    echo "$user_file"
+}
+
+_limon_do_edit() {
+    local theme_name="${1:-$saved_theme}"
+    local editor="${EDITOR:-${VISUAL:-vi}}"
+    local theme_file
+
+    theme_file="$(_limon_ensure_user_theme "$theme_name")"
+    echo "limon: editing $theme_file"
+    "$editor" "$theme_file"
+
+    if _limon_is_active && [[ "$saved_theme" == "$theme_name" ]]; then
+        unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
+              __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
+              __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
+        LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
+        limon_runner
+    fi
+}
+
+_limon_expand_ps1() {
+    local ps1="$1"
+    ps1="${ps1//\\u/${USER:-user}}"
+    ps1="${ps1//\\h/${HOSTNAME:-$(hostname 2>/dev/null || echo host)}}"
+    ps1="${ps1//\\w/$PWD}"
+    ps1="${ps1//\\\[}"
+    ps1="${ps1//\\\]}"
+    ps1="${ps1//\\n/$'\n'}"
+    printf '%b' "$ps1"
+}
+
+_limon_do_preview() {
+    local theme_name="${1:-default}"
+    local saved_ps1="${PS1:-}"
+    local saved_exit="${LAST_EXIT_CODE:-0}"
+    local theme_path
+
+    LAST_EXIT_CODE=0
+    main "$theme_name"
+    local preview_ps1="$PS1"
+    export PS1="$saved_ps1"
+    LAST_EXIT_CODE="$saved_exit"
+
+    theme_path="$(_limon_resolve_theme_file "$theme_name" 2>/dev/null || true)"
+    echo "Theme: $theme_name"
+    if [[ -n "$theme_path" ]]; then
+        echo "File: $theme_path"
+    else
+        echo "File: (built-in defaults)"
+    fi
+    echo ""
+    _limon_expand_ps1 "$preview_ps1"
+    echo ""
+}
+
 # Restore the current shell's prompt and forget Limon state (used by off/uninstall).
 _limon_restore_session() {
     export PS1="$DEFAULT_PS1"
@@ -743,7 +847,9 @@ _limon_load_config
 
 THEME_NAME="${1:-}"
 if [[ -z "$THEME_NAME" ]]; then
-    THEME_NAME="$saved_theme"
+    case "$SUBCOMMAND" in
+        on|edit) THEME_NAME="$saved_theme" ;;
+    esac
 fi
 
 # --- 4. Save State ---
@@ -757,7 +863,7 @@ fi
 
 export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
        LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS
+       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK
 
 # --- 5. Git Info (single call + short cache) ---
 _limon_git_op_state() {
@@ -1019,7 +1125,10 @@ main() {
     fi
 
     local time_display=""
-    [[ -n "$elapsed_str" ]] && time_display="$col_time$elapsed_str "
+    if [[ "${LIMON_SHOW_CLOCK:-0}" == "1" ]]; then
+        time_display+="$col_time$(date +%H:%M) "
+    fi
+    [[ -n "$elapsed_str" ]] && time_display+="$col_time$elapsed_str "
 
     local jobs_str=""
     local job_count
@@ -1096,7 +1205,7 @@ case "$SUBCOMMAND" in
             _limon_load_config
             export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
                    LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-                   LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS
+                   LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK
             export LIMON_THEME_ARG="$saved_theme"
             LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
             limon_runner
@@ -1118,7 +1227,7 @@ case "$SUBCOMMAND" in
         fi
         echo "Config: $LIMON_CONF"
         echo "Options: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
-        echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS"
+        echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK"
         if [[ -n "${LIMON_ENV:-}" ]]; then
             echo "Environment: LIMON_ENV=$LIMON_ENV"
         fi
@@ -1154,12 +1263,22 @@ case "$SUBCOMMAND" in
     health)
         _limon_do_health
         ;;
+    edit)
+        _limon_do_edit "${THEME_NAME:-$saved_theme}"
+        ;;
+    preview)
+        if [[ -z "${THEME_NAME:-}" ]]; then
+            echo "limon: usage: limon preview <theme>" >&2
+        else
+            _limon_do_preview "$THEME_NAME"
+        fi
+        ;;
     config)
         CONFIG_ARG="${1:-}"
         if [[ -z "$CONFIG_ARG" ]]; then
-            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1"
+            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1|show_exit=0|1|exit_hints=0|1|clock=0|1"
             echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
-            echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS"
+            echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK"
         else
             config_ok=0
             case "$CONFIG_ARG" in
@@ -1247,6 +1366,12 @@ case "$SUBCOMMAND" in
                         *) echo "limon: exit_hints must be 0 or 1" >&2 ;;
                     esac
                     ;;
+                clock=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_SHOW_CLOCK="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: clock must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
                 *)
                     echo "limon: unknown config option '$CONFIG_ARG'" >&2
                     echo "Usage: limon config ... host_color=auto|off|N env_banner=0|1 show_root=0|1 show_sudo=0|1 k8s=0|1 cloud=0|1" >&2
@@ -1257,7 +1382,7 @@ case "$SUBCOMMAND" in
                 _limon_write_config "$saved_theme" "${_limon_flags[@]}"
                 export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
                        LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-                       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS
+                       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK
                 if _limon_is_active; then
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
@@ -1299,6 +1424,8 @@ Usage:
     limon status         Show current state
     limon health         Run install and prompt diagnostics
     limon themes         List available themes
+    limon edit [theme]   Open theme in \$EDITOR (creates ~/.config/limon/themes/ copy)
+    limon preview <theme> Show sample prompt without switching
     limon config KEY=VAL Set timer, git, host, safety, and rendering options
     limon colors         Show ANSI color codes
     limon version        Show the installed Limon version
@@ -1334,6 +1461,9 @@ Git clarity:
 Exit codes:
     limon config show_exit=1        Show exit code on failure (e.g. x127 $)
     limon config exit_hints=1       Add hints like x130(SIGINT) when show_exit=1
+
+Prompt extras:
+    limon config clock=1            Show HH:MM before the command timer (default off)
 
 Diagnostics:
     limon health                    Check bash, colors, git, theme, and prompt state
