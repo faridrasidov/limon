@@ -172,6 +172,11 @@ do_install() {
         echo "limon-install: copied runtime files (no .git found — 'limon upgrade' unavailable)"
     fi
 
+    # chmod +x on install.sh (or similar) must not block future `limon upgrade` pulls.
+    if [[ -d "$TARGET_DIR/.git" ]] && command -v git >/dev/null 2>&1; then
+        git -C "$TARGET_DIR" config core.fileMode false 2>/dev/null || true
+    fi
+
     # Refresh rc entries idempotently: strip any old block, then append a new one.
     _strip_rc "$RC_FILE"
     {

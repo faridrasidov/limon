@@ -32,13 +32,12 @@ The included `install.sh` script copies Limon into place and wires it into your 
 ```shell
 git clone https://github.com/faridrasidov/limon
 cd limon
-chmod +x install.sh
 
 # Install for the current user (no sudo needed):
-./install.sh
+bash install.sh
 
 # ...or install system-wide for all users:
-sudo ./install.sh --system
+sudo bash install.sh --system
 ```
 
 Then open a new terminal (or `source ~/.bashrc`) and Limon is on. The installer is **idempotent** — re-running it (or `limon upgrade`) safely refreshes the install without creating duplicate entries.

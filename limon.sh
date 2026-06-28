@@ -159,10 +159,16 @@ _limon_is_git_install() {
     command -v git >/dev/null 2>&1 && [[ -d "$SCRIPT_DIR/.git" ]]
 }
 
+# Ignore executable-bit-only diffs (e.g. after `chmod +x install.sh`) so upgrades work.
+_limon_git_prepare_repo() {
+    git -C "$SCRIPT_DIR" config core.fileMode false 2>/dev/null || true
+}
+
 # Quietly fetch and compare HEAD with upstream. Used in the background.
 # Marks an update as available (or auto-pulls when autoupdate=on).
 _limon_background_update_check() {
     _limon_is_git_install || return 0
+    _limon_git_prepare_repo
     git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet 2>/dev/null || return 0
 
     local local_rev remote_rev
@@ -224,7 +230,7 @@ _limon_do_upgrade() {
         echo "limon: not a git installation ($SCRIPT_DIR)." >&2
         echo "limon: to enable upgrades, reinstall from a clone:" >&2
         echo "limon:   git clone https://github.com/faridrasidov/limon" >&2
-        echo "limon:   cd limon && ./install.sh   # add --system for all users" >&2
+        echo "limon:   cd limon && bash install.sh   # add --system for all users" >&2
         return 1
     fi
     if [[ ! -w "$SCRIPT_DIR/.git" ]]; then
@@ -232,6 +238,10 @@ _limon_do_upgrade() {
         echo "limon: try: sudo git -C \"$SCRIPT_DIR\" pull --ff-only" >&2
         return 1
     fi
+
+    # Ignore executable-bit changes so a user's `chmod +x install.sh` (or similar)
+    # doesn't register as a local modification that blocks a fast-forward pull.
+    _limon_git_prepare_repo
 
     echo "limon: checking for updates in $SCRIPT_DIR ..."
     git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet 2>/dev/null
