@@ -187,6 +187,20 @@ _limon_maybe_autoupdate() {
     disown 2>/dev/null || true
 }
 
+# Load (or reload) the tab-completion hints into the current interactive shell.
+# Pass "force" to re-source even if completion is already registered (used after
+# an upgrade so updated completion logic takes effect without a new shell).
+_limon_load_hints() {
+    local force="${1:-}"
+    case $- in *i*) ;; *) return 0 ;; esac
+    command -v complete >/dev/null 2>&1 || return 0
+    if [[ "$force" != "force" ]] && complete -p limon >/dev/null 2>&1; then
+        return 0
+    fi
+    local hint="$SCRIPT_DIR/hint-limon.sh"
+    [[ -f "$hint" ]] && source "$hint"
+}
+
 # Manual, foreground updater for `limon upgrade`.
 _limon_do_upgrade() {
     if ! command -v git >/dev/null 2>&1; then
@@ -218,8 +232,9 @@ _limon_do_upgrade() {
 
     if git -C "$SCRIPT_DIR" pull --ff-only; then
         rm -f "$LIMON_UPDATE_FLAG"
-        echo "limon: updated successfully."
-        echo "limon: run 'limon on' or open a new terminal to load the new version."
+        _limon_load_hints force
+        echo "limon: updated successfully (tab-completion reloaded)."
+        echo "limon: run 'limon on' or open a new terminal to load the new prompt code."
     else
         echo "limon: update failed (local changes or non-fast-forward history)." >&2
         return 1
@@ -475,6 +490,7 @@ case "$SUBCOMMAND" in
         LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
         __LIMON_CMD_ELAPSED=0
         limon_runner
+        _limon_load_hints
         _limon_maybe_autoupdate
         ;;
     upgrade|update)

@@ -165,7 +165,9 @@ do_install() {
     echo "limon-install: done."
     echo "limon-install: installed to $TARGET_DIR"
     echo "limon-install: added startup entries to $RC_FILE"
-    echo "limon-install: open a new terminal or run: source \"$RC_FILE\""
+    echo "limon-install: open a new terminal, or run the line below to enable Limon"
+    echo "limon-install: (prompt + tab-completion) in this shell right now:"
+    echo "limon-install:     source \"$RC_FILE\""
 }
 
 # --- Uninstall ---
