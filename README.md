@@ -127,7 +127,11 @@ limon reload          # Reload theme/config without toggling off
 limon config git=lite # Set git mode: full, lite, or off
 limon config timer_threshold=3
 limon config show_ssh=1 # Show an [ssh] tag on remote sessions (off by default)
+limon config ascii=1    # Use ASCII symbols (# > ^ v) for dumb terminals
+limon config max_path=40 # Truncate long paths (e.g. ~/…/project/src)
 ```
+
+Colors automatically disable when `TERM=dumb` or output is not a TTY (safe for logs and `script`).
 
 *(Note: Limon remembers your last used theme automatically!)*
 
@@ -231,6 +235,7 @@ col_time='\[\e[38;5;242m\]'   # Grey for the timer
 theme_multiline=0             # Set to 1 for a two-line prompt
 theme_separator=":"           # Character between host and path
 theme_symbol_prefix="➜ "      # Symbol right before your typing area
+theme_max_path=0              # Truncate long paths (0 = use bash \w; e.g. 40)
 
 ```
 
