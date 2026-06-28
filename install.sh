@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 #
 # Limon installer / uninstaller
+# Copyright (C) 2026 Farid Rasidov
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+# See the LICENSE file for the full text.
 #
 # Usage:
 #   ./install.sh                 Install for the current user (no sudo needed)

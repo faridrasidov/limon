@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+#
+# limon - Optimized Bash Prompt
+# Copyright (C) 2026 Farid Rasidov
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+# See the LICENSE file for the full text.
 
 # limon - Optimized Bash Prompt
 # Features: 256-Color ANSI Support, Color Picker, Silent Default, Modular Themes

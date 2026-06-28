@@ -295,6 +295,14 @@ To help others discover this project, the repository uses topics such as:
 
 ---
 
+## 📄 License
+
+Limon is free software, licensed under the **GNU General Public License v3.0 or later** (GPL-3.0-or-later).
+
+You are free to use, modify, and distribute this project under the terms of the GPL. See the [LICENSE](LICENSE) file for the full license text.
+
+---
+
 ### Contributions
 
 Ideas, bug reports, and new themes are always welcome! Feel free to open an issue or submit a Pull Request.
