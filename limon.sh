@@ -215,12 +215,14 @@ _limon_init_symbols() {
         __LIMON_SYM_UP="^"
         __LIMON_SYM_DOWN="v"
         __LIMON_SYM_WARN="!"
+        __LIMON_SYM_STASH="="
     else
         __LIMON_SYM_LOCK=" 🔒"
         __LIMON_SYM_ARROW="➜ "
         __LIMON_SYM_UP="↑"
         __LIMON_SYM_DOWN="↓"
         __LIMON_SYM_WARN="⚠"
+        __LIMON_SYM_STASH="≡"
     fi
 }
 
@@ -232,6 +234,7 @@ _limon_ascii_text() {
     s="${s//➜/$__LIMON_SYM_ARROW}"
     s="${s//🔒/$__LIMON_SYM_LOCK}"
     s="${s//⚠/$__LIMON_SYM_WARN}"
+    s="${s//≡/$__LIMON_SYM_STASH}"
     echo "$s"
 }
 
@@ -486,7 +489,8 @@ _limon_restore_session() {
     PROMPT_COMMAND="$DEFAULT_PROMPT_COMMAND"
     unset __LIMON_CMD_START __LIMON_CMD_ELAPSED \
           __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
-          __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
+          __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
+          __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
 }
 
 # Run the installer's uninstall flow, then clean up the live shell session.
@@ -530,6 +534,32 @@ export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON
        LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD
 
 # --- 5. Git Info (single call + short cache) ---
+_limon_git_op_state() {
+    local git_dir
+    git_dir="$(git --no-optional-locks rev-parse --git-dir 2>/dev/null)" || return 1
+    if [[ -f "$git_dir/MERGE_HEAD" ]]; then
+        echo "MERGING"
+    elif [[ -d "$git_dir/rebase-merge" || -d "$git_dir/rebase-apply" ]]; then
+        echo "REBASING"
+    elif [[ -f "$git_dir/CHERRY_PICK_HEAD" ]]; then
+        echo "CHERRY-PICK"
+    else
+        return 1
+    fi
+}
+
+_limon_git_stash_count() {
+    if [[ $((SECONDS - ${__LIMON_STASH_CACHE_SEC:-0})) -lt 2 && "${__LIMON_STASH_CACHE:-}" =~ ^[0-9]+$ ]]; then
+        echo "$__LIMON_STASH_CACHE"
+        return
+    fi
+    local count
+    count="$(git --no-optional-locks stash list 2>/dev/null | wc -l | tr -d ' ')"
+    __LIMON_STASH_CACHE="${count:-0}"
+    __LIMON_STASH_CACHE_SEC=$SECONDS
+    echo "$__LIMON_STASH_CACHE"
+}
+
 _limon_git_lite() {
     __LIMON_GIT_BRANCH=""
     __LIMON_GIT_MARKS=""
@@ -547,11 +577,12 @@ _limon_git_lite() {
     __LIMON_GIT_IN_REPO=1
 }
 
-# Sets: __LIMON_GIT_BRANCH, __LIMON_GIT_MARKS, __LIMON_GIT_IN_REPO
+# Sets: __LIMON_GIT_BRANCH, __LIMON_GIT_MARKS, __LIMON_GIT_IN_REPO, __LIMON_GIT_DETACHED
 _limon_git_info() {
     __LIMON_GIT_BRANCH=""
     __LIMON_GIT_MARKS=""
     __LIMON_GIT_IN_REPO=0
+    __LIMON_GIT_DETACHED=0
 
     case "${LIMON_GIT_MODE:-full}" in
         off) return ;;
@@ -564,37 +595,70 @@ _limon_git_info() {
 
     if [[ "${__LIMON_GIT_CACHE_PWD:-}" == "$PWD" && \
           "${__LIMON_GIT_CACHE_ASCII:-}" == "${LIMON_ASCII:-0}" && \
+          "${__LIMON_GIT_CACHE_MODE:-}" == "${LIMON_GIT_MODE:-full}" && \
           $((SECONDS - ${__LIMON_GIT_CACHE_SEC:-0})) -lt 1 ]]; then
         __LIMON_GIT_BRANCH="$__LIMON_GIT_CACHE_BRANCH"
         __LIMON_GIT_MARKS="$__LIMON_GIT_CACHE_MARKS"
+        __LIMON_GIT_DETACHED="${__LIMON_GIT_CACHE_DETACHED:-0}"
         __LIMON_GIT_IN_REPO=1
         return
     fi
 
-    local line marks="" push_count=0 pull_count=0 got_branch=0
+    local line push_count=0 pull_count=0 got_branch=0
+    local staged=0 unstaged=0 untracked=0
+    local op_state marks=""
+
     while IFS= read -r line; do
         if [[ "$line" =~ ^## ]]; then
             got_branch=1
             if [[ "$line" =~ ^##\ No\ commits\ yet\ on\ (.+) ]]; then
                 __LIMON_GIT_BRANCH="${BASH_REMATCH[1]}"
+            elif [[ "$line" == *"detached at"* ]]; then
+                __LIMON_GIT_BRANCH="${line#*detached at }"
+                __LIMON_GIT_BRANCH="${__LIMON_GIT_BRANCH%)}"
+                __LIMON_GIT_DETACHED=1
             elif [[ "$line" =~ ^##\ (HEAD\ \(no\ branch\)) ]]; then
                 __LIMON_GIT_BRANCH="${BASH_REMATCH[1]}"
+                __LIMON_GIT_DETACHED=1
             elif [[ "$line" =~ ^##\ ([^.[:space:]]+) ]]; then
                 __LIMON_GIT_BRANCH="${BASH_REMATCH[1]}"
             fi
             [[ "$line" =~ ahead\ ([0-9]+) ]] && push_count=${BASH_REMATCH[1]}
             [[ "$line" =~ behind\ ([0-9]+) ]] && pull_count=${BASH_REMATCH[1]}
+        elif [[ "$line" == \?\?* ]]; then
+            ((untracked++)) || true
         else
-            if [[ "$line" == \?\?* ]]; then marks+=" ?"; else marks+=" (@)"; fi
+            local x="${line:0:1}" y="${line:1:1}"
+            [[ "$x" != " " && "$x" != "?" ]] && ((staged++)) || true
+            [[ "$y" != " " ]] && ((unstaged++)) || true
         fi
     done < <(git --no-optional-locks status --porcelain --branch 2>/dev/null)
 
     if [[ $got_branch -eq 1 ]]; then
         __LIMON_GIT_IN_REPO=1
-        [[ "$marks" == *"(@)"* ]] && __LIMON_GIT_MARKS+=" (@)"
-        [[ "$marks" == *"?"* ]] && __LIMON_GIT_MARKS+=" ?"
-        [[ $push_count -gt 0 ]] && __LIMON_GIT_MARKS+=" ↑$push_count"
-        [[ $pull_count -gt 0 ]] && __LIMON_GIT_MARKS+=" ↓$pull_count"
+
+        op_state="$(_limon_git_op_state 2>/dev/null || true)"
+        [[ -n "$op_state" ]] && marks+=" {$op_state}"
+
+        [[ "${__LIMON_GIT_DETACHED:-0}" == "1" ]] && marks+=" (DETACHED)"
+
+        if [[ "${LIMON_GIT_MODE:-full}" == "verbose" ]]; then
+            [[ $staged -gt 0 ]] && marks+=" +$staged"
+            [[ $unstaged -gt 0 ]] && marks+=" ~$unstaged"
+            [[ $untracked -gt 0 ]] && marks+=" ?$untracked"
+        else
+            [[ $staged -gt 0 || $unstaged -gt 0 ]] && marks+=" (@)"
+            [[ $untracked -gt 0 ]] && marks+=" ?"
+        fi
+
+        local stash_n
+        stash_n="$(_limon_git_stash_count 2>/dev/null || echo 0)"
+        [[ "${stash_n:-0}" -gt 0 ]] && marks+=" ≡${stash_n}"
+
+        [[ $push_count -gt 0 ]] && marks+=" ↑$push_count"
+        [[ $pull_count -gt 0 ]] && marks+=" ↓$pull_count"
+
+        __LIMON_GIT_MARKS="$marks"
 
         _limon_init_symbols
         if [[ "${LIMON_ASCII:-0}" == "1" ]]; then
@@ -604,11 +668,14 @@ _limon_git_info() {
         __LIMON_GIT_CACHE_PWD="$PWD"
         __LIMON_GIT_CACHE_SEC=$SECONDS
         __LIMON_GIT_CACHE_ASCII="${LIMON_ASCII:-0}"
+        __LIMON_GIT_CACHE_MODE="${LIMON_GIT_MODE:-full}"
         __LIMON_GIT_CACHE_BRANCH="$__LIMON_GIT_BRANCH"
         __LIMON_GIT_CACHE_MARKS="$__LIMON_GIT_MARKS"
+        __LIMON_GIT_CACHE_DETACHED="${__LIMON_GIT_DETACHED:-0}"
     else
         unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
-              __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
+              __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
+              __LIMON_GIT_CACHE_DETACHED
     fi
 }
 
@@ -666,10 +733,12 @@ main() {
     local git_str=""
     _limon_git_info
     if [[ ${__LIMON_GIT_IN_REPO:-0} -eq 1 ]]; then
+        local git_color="$col_git"
+        [[ "${__LIMON_GIT_DETACHED:-0}" == "1" ]] && git_color="$col_err"
         if [[ "$theme_multiline" -eq 1 ]]; then
-            git_str="$col_git$__LIMON_GIT_MARKS ($__LIMON_GIT_BRANCH)"
+            git_str="$git_color$__LIMON_GIT_MARKS ($__LIMON_GIT_BRANCH)"
         else
-            git_str="$col_git$__LIMON_GIT_MARKS [$__LIMON_GIT_BRANCH]"
+            git_str="$git_color$__LIMON_GIT_MARKS [$__LIMON_GIT_BRANCH]"
         fi
     fi
 
@@ -796,7 +865,8 @@ case "$SUBCOMMAND" in
             echo "limon: not active (run 'limon on' first)" >&2
         else
             unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
-                  __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
+                  __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
+                  __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
             _limon_load_config
             export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
                    LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
@@ -865,7 +935,12 @@ case "$SUBCOMMAND" in
             config_ok=0
             case "$CONFIG_ARG" in
                 timer_threshold=*) LIMON_TIMER_THRESHOLD="${CONFIG_ARG#*=}"; config_ok=1 ;;
-                git=*) LIMON_GIT_MODE="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                git=*)
+                    case "${CONFIG_ARG#*=}" in
+                        full|lite|verbose|off) LIMON_GIT_MODE="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: git must be full, lite, verbose, or off" >&2 ;;
+                    esac
+                    ;;
                 show_host=*) LIMON_SHOW_HOST="${CONFIG_ARG#*=}"; config_ok=1 ;;
                 show_ssh=*) LIMON_SHOW_SSH="${CONFIG_ARG#*=}"; config_ok=1 ;;
                 autoupdate=*)
@@ -944,7 +1019,8 @@ case "$SUBCOMMAND" in
                        LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD
                 if _limon_is_active; then
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
-                          __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS
+                          __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
+                          __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
                     limon_runner
                 fi
             fi
@@ -1006,6 +1082,12 @@ Identity & safety:
     limon config show_sudo=1        Show (sudo) when cached sudo credentials exist (default)
     limon config cloud=1            Show AWS_PROFILE when set
     limon config k8s=1              Show kubectl current-context (cached 2s)
+
+Git clarity:
+    limon config git=full           Branch, dirty (?), ahead/behind, stash, operations (default)
+    limon config git=verbose        Detailed +N staged, ~N modified, ?N untracked counts
+    limon config git=lite           Branch name only (faster)
+    limon config git=off            Hide git segment
 
 Config file: $LIMON_CONF
   Example: neon -env_banner=1 -host_color=auto -cloud=1 -k8s=1

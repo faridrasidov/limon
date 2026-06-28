@@ -16,7 +16,7 @@ Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? H
 * 🔤 **No Patched Fonts Required:** Uses standard, universal Unicode symbols. It looks perfect out-of-the-box on any OS or font.
 * 🎨 **256-Color Modular Themes:** Choose from 11 built-in themes (Limon, Dracula, Nord, Neon, and more) or easily create your own with the built-in color picker.
 * ⏱️ **Smart Execution Timer:** Automatically displays how long a command took to run (only appears if the command takes longer than 2 seconds).
-* 🌿 **Git Branch in Prompt:** Instantly see your current Git branch, uncommitted changes `(@)`, untracked files `(?)`, and commits ahead/behind remote `(↑/↓)` — git branch status right in your bash prompt.
+* 🌿 **Git Branch in Prompt:** See branch, staged/unstaged/untracked counts (`+N ~N ?N` in verbose mode), merge/rebase state, stash count (`≡N`), detached HEAD warning, and ahead/behind `(↑/↓)`.
 * 🔒 **Context-Aware Directories:** * Directories you don't have write access to are marked with a `🔒` and colored gray.
   * Warns you visually when operating as the `root` user outside of safe directories.
 * 🐍 **Environment Support:** Automatically detects and displays active `Python venv`, `Conda`, and `Docker` environments.
@@ -124,7 +124,8 @@ limon off
 limon status          # Show on/off, theme, and config options
 limon themes          # List all available themes
 limon reload          # Reload theme/config without toggling off
-limon config git=lite # Set git mode: full, lite, or off
+limon config git=lite    # Branch only (fast)
+limon config git=verbose # Detailed +N staged, ~N modified, ?N untracked
 limon config timer_threshold=3
 limon config show_ssh=1 # Show an [ssh] tag on remote sessions (off by default)
 limon config ascii=1    # Use ASCII symbols (# > ^ v) for dumb terminals
