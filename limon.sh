@@ -194,6 +194,169 @@ _limon_is_active() {
     [[ "${PROMPT_COMMAND:-}" == *"limon_runner"* ]]
 }
 
+# --- Phase 9: Trust & diagnostics ---
+_limon_validate_theme_file() {
+    local file="$1"
+    local warnings=0
+    local line key val
+
+    [[ -f "$file" ]] || return 1
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line//[[:space:]]/}" ]] && continue
+        if [[ "$line" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            val="${BASH_REMATCH[2]}"
+            case "$key" in
+                col_ok|col_err|col_git|col_dir|col_host|col_time|\
+                theme_multiline|theme_separator|theme_symbol_prefix|theme_max_path) ;;
+                *)
+                    echo "limon: theme warning: unknown variable '$key' in $file" >&2
+                    ((warnings++)) || true
+                    ;;
+            esac
+            if [[ "$key" == col_* ]]; then
+                if ! _limon_brackets_balanced "$val"; then
+                    echo "limon: theme warning: unbalanced \\[ \\] in $key ($file)" >&2
+                    ((warnings++)) || true
+                fi
+            fi
+        else
+            echo "limon: theme warning: invalid line in $file: $line" >&2
+            ((warnings++)) || true
+        fi
+    done < "$file"
+
+    return "$warnings"
+}
+
+_limon_health_msg() {
+    printf '  %-4s %s\n' "$1" "$2"
+}
+
+_limon_do_health() {
+    local issues=0 warnings=0 theme_path tw
+
+    echo "Limon health check (v$LIMON_VERSION)"
+    echo ""
+
+    if [[ "${BASH_VERSINFO[0]:-0}" -ge 4 ]]; then
+        _limon_health_msg OK "bash ${BASH_VERSION}"
+    else
+        _limon_health_msg FAIL "bash ${BASH_VERSION} (4.0+ required)"
+        ((issues++)) || true
+    fi
+
+    if _limon_use_color; then
+        if command -v tput >/dev/null 2>&1; then
+            local colors
+            colors="$(tput colors 2>/dev/null || echo 0)"
+            if [[ "${colors:-0}" -ge 256 ]]; then
+                _limon_health_msg OK "256-color terminal (tput colors=$colors, TERM=${TERM:-unknown})"
+            elif [[ "${colors:-0}" -ge 8 ]]; then
+                _limon_health_msg WARN "basic colors only (tput colors=$colors; 256 recommended)"
+                ((warnings++)) || true
+            else
+                _limon_health_msg WARN "color support limited (tput colors=$colors)"
+                ((warnings++)) || true
+            fi
+        else
+            _limon_health_msg WARN "tput not found; 256-color support unverified"
+            ((warnings++)) || true
+        fi
+    else
+        _limon_health_msg OK "no-color mode (TERM=${TERM:-unknown})"
+    fi
+
+    if command -v git >/dev/null 2>&1; then
+        _limon_health_msg OK "git $(git --version 2>/dev/null | awk '{print $3}')"
+    else
+        _limon_health_msg WARN "git not found (git segment unavailable)"
+        ((warnings++)) || true
+    fi
+
+    if [[ -f "$LIMON_CONF" ]]; then
+        _limon_health_msg OK "config $LIMON_CONF"
+    else
+        _limon_health_msg WARN "config file missing (using defaults)"
+        ((warnings++)) || true
+    fi
+
+    theme_path="$(_limon_resolve_theme_file "$saved_theme" 2>/dev/null || true)"
+    if [[ -n "$theme_path" ]]; then
+        if _limon_validate_theme_file "$theme_path"; then
+            _limon_health_msg OK "theme '$saved_theme' ($theme_path)"
+        else
+            tw=$?
+            _limon_health_msg WARN "theme '$saved_theme' has $tw warning(s)"
+            ((warnings+=tw)) || true
+        fi
+    else
+        _limon_health_msg WARN "theme '$saved_theme' not found (using built-in defaults)"
+        ((warnings++)) || true
+    fi
+
+    if _limon_is_active; then
+        _limon_health_msg OK "prompt active"
+        if _limon_brackets_balanced "${PS1:-}"; then
+            _limon_health_msg OK "PS1 \\[ \\] markers balanced"
+        else
+            _limon_health_msg FAIL "PS1 has unbalanced \\[ \\] markers"
+            ((issues++)) || true
+        fi
+        if [[ "${PROMPT_COMMAND:-}" == *"limon_runner"* ]]; then
+            _limon_health_msg OK "limon_runner hooked in PROMPT_COMMAND"
+        else
+            _limon_health_msg FAIL "prompt active but limon_runner missing from PROMPT_COMMAND"
+            ((issues++)) || true
+        fi
+    else
+        _limon_health_msg OK "prompt off"
+        if [[ "${PROMPT_COMMAND:-}" == *"limon_runner"* ]]; then
+            _limon_health_msg FAIL "limon_runner still in PROMPT_COMMAND (run 'limon off')"
+            ((issues++)) || true
+        else
+            _limon_health_msg OK "clean PROMPT_COMMAND (no limon_runner)"
+        fi
+    fi
+
+    if trap -p DEBUG 2>/dev/null | grep -q .; then
+        _limon_health_msg WARN "DEBUG trap is set (limon does not use DEBUG)"
+        ((warnings++)) || true
+    else
+        _limon_health_msg OK "no DEBUG trap"
+    fi
+
+    if [[ -r "$SCRIPT_DIR/limon.sh" ]]; then
+        _limon_health_msg OK "install $SCRIPT_DIR"
+    else
+        _limon_health_msg FAIL "limon.sh not readable at $SCRIPT_DIR"
+        ((issues++)) || true
+    fi
+
+    if _limon_is_git_install; then
+        if [[ -w "$SCRIPT_DIR/.git" ]]; then
+            _limon_health_msg OK "git install is writable (upgrades supported)"
+        else
+            _limon_health_msg WARN "git install not writable (use sudo for limon upgrade)"
+            ((warnings++)) || true
+        fi
+    fi
+
+    echo ""
+    if [[ $issues -eq 0 ]]; then
+        if [[ $warnings -eq 0 ]]; then
+            echo "Result: healthy"
+        else
+            echo "Result: healthy with $warnings warning(s)"
+        fi
+        return 0
+    fi
+    echo "Result: $issues issue(s), $warnings warning(s)"
+    return 1
+}
+
 # --- Phase 5: Safe rendering helpers ---
 _limon_use_color() {
     [[ "${LIMON_NO_COLOR:-}" == "1" ]] && return 1
@@ -547,7 +710,9 @@ _limon_do_upgrade() {
 # Restore the current shell's prompt and forget Limon state (used by off/uninstall).
 _limon_restore_session() {
     export PS1="$DEFAULT_PS1"
-    PROMPT_COMMAND="$DEFAULT_PROMPT_COMMAND"
+    PROMPT_COMMAND="${DEFAULT_PROMPT_COMMAND:-}"
+    trap - DEBUG 2>/dev/null || true
+    unset timer LAST_EXIT_CODE 2>/dev/null || true
     unset __LIMON_CMD_START __LIMON_CMD_ELAPSED \
           __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
@@ -758,7 +923,10 @@ main() {
 
     local theme_file
     theme_file="$(_limon_resolve_theme_file "$theme_name" 2>/dev/null || true)"
-    [[ -n "$theme_file" ]] && source "$theme_file"
+    if [[ -n "$theme_file" ]]; then
+        _limon_validate_theme_file "$theme_file" || true
+        source "$theme_file"
+    fi
 
     local c_reset='\[\e[m\]'
     local c_gray='\[\e[38;5;240m\]'
@@ -983,6 +1151,9 @@ case "$SUBCOMMAND" in
             echo "No themes found."
         fi
         ;;
+    health)
+        _limon_do_health
+        ;;
     config)
         CONFIG_ARG="${1:-}"
         if [[ -z "$CONFIG_ARG" ]]; then
@@ -1126,6 +1297,7 @@ Usage:
     limon upgrade        Update Limon to the latest version (git pull)
     limon uninstall      Remove Limon (prompts to keep or delete config)
     limon status         Show current state
+    limon health         Run install and prompt diagnostics
     limon themes         List available themes
     limon config KEY=VAL Set timer, git, host, safety, and rendering options
     limon colors         Show ANSI color codes
@@ -1162,6 +1334,9 @@ Git clarity:
 Exit codes:
     limon config show_exit=1        Show exit code on failure (e.g. x127 $)
     limon config exit_hints=1       Add hints like x130(SIGINT) when show_exit=1
+
+Diagnostics:
+    limon health                    Check bash, colors, git, theme, and prompt state
 
 Config file: $LIMON_CONF
   Example: neon -env_banner=1 -host_color=auto -cloud=1 -k8s=1

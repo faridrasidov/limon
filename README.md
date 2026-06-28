@@ -122,6 +122,7 @@ limon off
 
 ```bash
 limon status          # Show on/off, theme, and config options
+limon health          # Run diagnostics (bash, colors, git, theme, prompt)
 limon themes          # List all available themes
 limon reload          # Reload theme/config without toggling off
 limon config git=lite    # Branch only (fast)
