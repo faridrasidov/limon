@@ -3,6 +3,8 @@
 # limon - Optimized Bash Prompt
 # Features: 256-Color ANSI Support, Color Picker, Silent Default, Modular Themes
 
+LIMON_VERSION="1.0.0"
+
 # --- 1. Self-Healing & Safety ---
 if [[ "${DEFAULT_PROMPT_COMMAND:-}" == *"not found"* ]] || \
    [[ "${DEFAULT_PROMPT_COMMAND:-}" == *"limon_runner"* ]]; then
@@ -521,6 +523,7 @@ case "$SUBCOMMAND" in
         else
             echo "Limon: off"
         fi
+        echo "Version: $LIMON_VERSION"
         echo "Theme: $saved_theme"
         theme_path="$(_limon_resolve_theme_file "$saved_theme" 2>/dev/null || true)"
         if [[ -n "$theme_path" ]]; then
@@ -595,6 +598,13 @@ case "$SUBCOMMAND" in
         done
         echo ""
         ;;
+    version|--version|-v)
+        printf 'limon %s\n' "$LIMON_VERSION"
+        if _limon_is_git_install; then
+            rev="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+            [[ -n "$rev" ]] && printf 'commit %s\n' "$rev"
+        fi
+        ;;
     help|"")
         echo "
 limon - Optimized Bash Prompt
@@ -609,6 +619,7 @@ Usage:
     limon themes         List available themes
     limon config KEY=VAL Set timer_threshold, git, show_host, show_ssh, or autoupdate
     limon colors         Show ANSI color codes
+    limon version        Show the installed Limon version
     limon help           Show this help
 
 Auto-update:
