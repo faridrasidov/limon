@@ -150,6 +150,47 @@ Colors automatically disable when `TERM=dumb` or output is not a TTY (safe for l
 
 ---
 
+## 📊 Performance & Metrics
+
+Limon is built for speed, and you can measure it. Limon can report how long it takes to render your prompt (wall-clock) and how much memory the shell is using.
+
+**Benchmark the prompt render time:**
+
+```bash
+limon bench        # Average render time over 100 runs
+limon bench 500    # More iterations for a steadier average
+```
+
+Example output:
+
+```
+Limon prompt benchmark
+  theme:       limon
+  git mode:    full
+  iterations:  100
+  total:       48.300 ms
+  per render:  0.483 ms (avg)
+  shell RSS:   5120 KB (~5 MB, whole bash process)
+  tip: most cost is the git status call; 'limon config git=lite' or 'git=off' is faster.
+```
+
+**See the live render time of each prompt:**
+
+```bash
+limon config metrics=1   # Record render time on every prompt (negligible overhead)
+limon status             # Shows "Last render: 0.4xx ms" and memory usage
+limon config metrics=0   # Turn it back off (default)
+```
+
+`limon health` also includes a quick render-time and memory line.
+
+> **Notes:**
+> - Render time is **wall-clock** time spent building the prompt. Sub-millisecond precision needs **bash 5+** (uses `$EPOCHREALTIME`, no subprocess) or **GNU `date`**.
+> - The memory figure is the **whole bash process** RSS (read from `/proc/$$/status` on Linux, or `ps` elsewhere), not Limon in isolation — Limon adds no background processes of its own.
+> - The biggest factor in render time is the `git` status call. Use `limon config git=lite` (branch only) or `git=off` to speed up huge repositories.
+
+---
+
 ## 🔄 Updating Limon
 
 Limon installs as a small Git repository, so updating to the latest version is built in.
@@ -322,6 +363,9 @@ Install Limon and run `limon on`. It automatically detects Git repositories and 
 
 **What is the fastest Bash prompt?**
 Limon is written in pure Bash with no external interpreters, so there is no per-prompt startup cost from Python, Node.js, or a separate binary. This makes it one of the fastest, most lightweight ways to get a colorful, Git-aware prompt.
+
+**How can I measure how fast (or heavy) my prompt is?**
+Run `limon bench` to see the average render time over many runs, plus the shell's memory usage. For a live per-prompt reading, enable `limon config metrics=1` and check `limon status`. See [Performance & Metrics](#-performance--metrics) for details.
 
 **Do I need Nerd Fonts for a colored prompt?**
 No. Limon uses only standard, universal Unicode symbols and 256-color ANSI codes, so it looks correct out-of-the-box on any OS, terminal, or font — no patched Nerd Fonts required.

@@ -64,6 +64,7 @@ LIMON_CLOUD=0
 LIMON_SHOW_EXIT=0
 LIMON_EXIT_HINTS=0
 LIMON_SHOW_CLOCK=0
+LIMON_METRICS=0
 
 LIMON_UPDATE_STAMP="$LIMON_CONF_DIR/.last_update_check"
 LIMON_UPDATE_FLAG="$LIMON_CONF_DIR/.update_available"
@@ -133,6 +134,7 @@ _limon_load_config() {
     LIMON_SHOW_EXIT=0
     LIMON_EXIT_HINTS=0
     LIMON_SHOW_CLOCK=0
+    LIMON_METRICS=0
 
     if [[ -f "$LIMON_CONF" ]]; then
         read -r -a conf_parts < "$LIMON_CONF"
@@ -155,6 +157,7 @@ _limon_load_config() {
                 -show_exit=*) LIMON_SHOW_EXIT="${part#*=}" ;;
                 -exit_hints=*) LIMON_EXIT_HINTS="${part#*=}" ;;
                 -clock=*) LIMON_SHOW_CLOCK="${part#*=}" ;;
+                -metrics=*) LIMON_METRICS="${part#*=}" ;;
                 -*) ;;
                 *) saved_theme="$part" ;;
             esac
@@ -195,6 +198,7 @@ _limon_conf_flags() {
     [[ "$LIMON_SHOW_EXIT" != "0" ]] && flags+=("-show_exit=$LIMON_SHOW_EXIT")
     [[ "$LIMON_EXIT_HINTS" != "0" ]] && flags+=("-exit_hints=$LIMON_EXIT_HINTS")
     [[ "$LIMON_SHOW_CLOCK" != "0" ]] && flags+=("-clock=$LIMON_SHOW_CLOCK")
+    [[ "$LIMON_METRICS" != "0" ]] && flags+=("-metrics=$LIMON_METRICS")
     printf '%s\n' "${flags[@]}"
 }
 
@@ -351,6 +355,21 @@ _limon_do_health() {
             ((warnings++)) || true
         fi
     fi
+
+    local hp_theme="${LIMON_THEME_ARG:-${saved_theme:-default}}" hp_ps1="$PS1" hp_t0 hp_t1 hp_n=20 hp_i
+    _limon_clock_us; hp_t0="$__LIMON_T"
+    if [[ -n "$hp_t0" ]]; then
+        for (( hp_i = 0; hp_i < hp_n; hp_i++ )); do main "$hp_theme" >/dev/null 2>&1; done
+        _limon_clock_us; hp_t1="$__LIMON_T"
+        PS1="$hp_ps1"
+        _limon_health_msg OK "render ~$(_limon_fmt_ms $(( (hp_t1 - hp_t0) / hp_n ))) avg over $hp_n runs (see 'limon bench')"
+    else
+        _limon_health_msg WARN "render timing unavailable (needs bash 5+ or GNU date)"
+        ((warnings++)) || true
+    fi
+    local hp_rss
+    hp_rss="$(_limon_rss_kb)"
+    [[ -n "$hp_rss" ]] && _limon_health_msg OK "memory ${hp_rss} KB RSS (whole bash process)"
 
     echo ""
     if [[ $issues -eq 0 ]]; then
@@ -601,6 +620,97 @@ _limon_display_path() {
     fi
 
     echo "$path"
+}
+
+# --- Metrics helpers ---
+# Sets __LIMON_T to the current time in integer microseconds, or "" if no
+# high-resolution clock is available. Uses bash 5's $EPOCHREALTIME with no
+# subprocess; falls back to GNU `date +%s%N` only when necessary.
+_limon_clock_us() {
+    if [[ -n "${EPOCHREALTIME:-}" ]]; then
+        local t="${EPOCHREALTIME/,/.}"
+        local s="${t%.*}" us="${t#*.}"
+        us="${us}000000"
+        us="${us:0:6}"
+        __LIMON_T="${s}${us}"
+    else
+        local n
+        n="$(date +%s%N 2>/dev/null)"
+        if [[ "$n" =~ ^[0-9]{16,}$ ]]; then
+            __LIMON_T=$(( n / 1000 ))
+        else
+            __LIMON_T=""
+        fi
+    fi
+}
+
+# Resident memory of the current shell process, in KB ("" if unavailable).
+# Note: this is the whole bash process, not limon alone.
+_limon_rss_kb() {
+    local kb=""
+    if [[ -r "/proc/$$/status" ]]; then
+        while IFS=$' \t' read -r key val _; do
+            if [[ "$key" == "VmRSS:" ]]; then kb="$val"; break; fi
+        done < "/proc/$$/status"
+    fi
+    if [[ -z "$kb" ]] && command -v ps >/dev/null 2>&1; then
+        kb="$(ps -o rss= -p "$$" 2>/dev/null | tr -d ' ')"
+    fi
+    [[ "$kb" =~ ^[0-9]+$ ]] && echo "$kb"
+}
+
+# Format integer microseconds as "N.NNN ms".
+_limon_fmt_ms() {
+    local us="$1"
+    (( us < 0 )) && us=0
+    printf '%d.%03d ms' $(( us / 1000 )) $(( us % 1000 ))
+}
+
+# Benchmark prompt rendering: limon bench [iterations]
+_limon_do_bench() {
+    local iters="${1:-100}"
+    [[ "$iters" =~ ^[0-9]+$ ]] || iters=100
+    (( iters < 1 )) && iters=1
+
+    local theme="${LIMON_THEME_ARG:-${saved_theme:-default}}"
+    local saved_ps1="$PS1"
+    local t0 t1
+
+    _limon_clock_us; t0="$__LIMON_T"
+    if [[ -z "$t0" ]]; then
+        echo "limon bench: no high-resolution timer (needs bash 5+ or GNU date)." >&2
+        PS1="$saved_ps1"
+        return 1
+    fi
+
+    local i
+    for (( i = 0; i < iters; i++ )); do
+        main "$theme" >/dev/null 2>&1
+    done
+
+    _limon_clock_us; t1="$__LIMON_T"
+    PS1="$saved_ps1"
+
+    local total_us=$(( t1 - t0 ))
+    (( total_us < 0 )) && total_us=0
+    local avg_us=$(( total_us / iters ))
+
+    echo "Limon prompt benchmark"
+    printf '  theme:       %s\n' "$theme"
+    printf '  git mode:    %s\n' "${LIMON_GIT_MODE:-full}"
+    printf '  iterations:  %d\n' "$iters"
+    printf '  total:       %s\n' "$(_limon_fmt_ms "$total_us")"
+    printf '  per render:  %s (avg)\n' "$(_limon_fmt_ms "$avg_us")"
+
+    local rss
+    rss="$(_limon_rss_kb)"
+    if [[ -n "$rss" ]]; then
+        printf '  shell RSS:   %d KB (~%d MB, whole bash process)\n' "$rss" $(( rss / 1024 ))
+    fi
+
+    if [[ "${LIMON_GIT_MODE:-full}" != "off" ]]; then
+        echo "  tip: most cost is the git status call; 'limon config git=lite' or 'git=off' is faster."
+    fi
 }
 
 # --- Auto-update helpers ---
@@ -944,7 +1054,7 @@ fi
 
 export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
        LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK
+       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK LIMON_METRICS
 
 # --- 5. Git Info (single call + short cache) ---
 _limon_git_op_state() {
@@ -1251,9 +1361,22 @@ limon_runner() {
         __LIMON_CMD_ELAPSED=0
     fi
     __LIMON_CMD_START=$SECONDS
-    main "$LIMON_THEME_ARG"
+    if [[ "${LIMON_METRICS:-0}" == "1" ]]; then
+        local __limon_a __limon_b
+        _limon_clock_us; __limon_a="$__LIMON_T"
+        main "$LIMON_THEME_ARG"
+        _limon_clock_us; __limon_b="$__LIMON_T"
+        if [[ -n "$__limon_a" && -n "$__limon_b" ]]; then
+            __LIMON_RENDER_US=$(( __limon_b - __limon_a ))
+            (( __LIMON_RENDER_US < 0 )) && __LIMON_RENDER_US=0
+            export __LIMON_RENDER_US
+        fi
+    else
+        main "$LIMON_THEME_ARG"
+    fi
 }
 export -f limon_runner
+export -f _limon_clock_us
 
 # Only 'limon on' changes the live theme. Other subcommands (status, config,
 # upgrade, etc.) must preserve the currently active theme so their argument
@@ -1293,7 +1416,7 @@ case "$SUBCOMMAND" in
             _limon_load_config
             export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
                    LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-                   LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK
+                   LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK LIMON_METRICS
             export LIMON_THEME_ARG="$saved_theme"
             LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
             limon_runner
@@ -1315,7 +1438,16 @@ case "$SUBCOMMAND" in
         fi
         echo "Config: $LIMON_CONF"
         echo "Options: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
-        echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK"
+        echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK metrics=$LIMON_METRICS"
+        if [[ "$LIMON_METRICS" == "1" && -n "${__LIMON_RENDER_US:-}" ]]; then
+            echo "Last render: $(_limon_fmt_ms "$__LIMON_RENDER_US") (run 'limon bench' for an average)"
+        elif [[ "$LIMON_METRICS" == "1" ]]; then
+            echo "Last render: (no sample yet — press Enter once, then run 'limon status')"
+        fi
+        status_rss="$(_limon_rss_kb)"
+        if [[ -n "$status_rss" ]]; then
+            echo "Memory: ${status_rss} KB RSS (whole bash process)"
+        fi
         if [[ -n "${LIMON_ENV:-}" ]]; then
             echo "Environment: LIMON_ENV=$LIMON_ENV"
         fi
@@ -1354,6 +1486,9 @@ case "$SUBCOMMAND" in
     health)
         _limon_do_health
         ;;
+    bench|benchmark)
+        _limon_do_bench "${1:-}"
+        ;;
     edit)
         _limon_do_edit "${THEME_NAME:-$saved_theme}"
         ;;
@@ -1367,9 +1502,9 @@ case "$SUBCOMMAND" in
     config)
         CONFIG_ARG="${1:-}"
         if [[ -z "$CONFIG_ARG" ]]; then
-            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1|show_exit=0|1|exit_hints=0|1|clock=0|1"
-            echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
-            echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK"
+            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|channel=stable|beta|dev|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1|show_exit=0|1|exit_hints=0|1|clock=0|1|metrics=0|1"
+            echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE channel=$LIMON_CHANNEL ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
+            echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK metrics=$LIMON_METRICS"
         else
             config_ok=0
             case "$CONFIG_ARG" in
@@ -1469,6 +1604,12 @@ case "$SUBCOMMAND" in
                         *) echo "limon: clock must be 0 or 1" >&2 ;;
                     esac
                     ;;
+                metrics=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_METRICS="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: metrics must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
                 *)
                     echo "limon: unknown config option '$CONFIG_ARG'" >&2
                     echo "Usage: limon config ... host_color=auto|off|N env_banner=0|1 show_root=0|1 show_sudo=0|1 k8s=0|1 cloud=0|1" >&2
@@ -1479,7 +1620,7 @@ case "$SUBCOMMAND" in
                 _limon_write_config "$saved_theme" "${_limon_flags[@]}"
                 export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
                        LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-                       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK
+                       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK LIMON_METRICS
                 if _limon_is_active; then
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
@@ -1520,6 +1661,7 @@ Usage:
     limon uninstall      Remove Limon (prompts to keep or delete config)
     limon status         Show current state
     limon health         Run install and prompt diagnostics
+    limon bench [N]      Benchmark prompt render time (default N=100)
     limon themes         List available themes
     limon edit [theme]   Open theme in \$EDITOR (creates ~/.config/limon/themes/ copy)
     limon preview <theme> Show sample prompt without switching
@@ -1571,6 +1713,13 @@ Prompt extras:
 
 Diagnostics:
     limon health                    Check bash, colors, git, theme, and prompt state
+
+Performance metrics:
+    limon bench                     Measure average prompt render time (100 runs)
+    limon bench 500                 Run more iterations for a steadier average
+    limon config metrics=1          Record live render time each prompt (shown in status)
+    limon config metrics=0          Stop recording live render time (default)
+    (render time is wall-clock; needs bash 5+ or GNU date for sub-ms precision)
 
 Config file: $LIMON_CONF
   Example: neon -env_banner=1 -host_color=auto -cloud=1 -k8s=1
