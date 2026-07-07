@@ -36,6 +36,11 @@ else
 fi
 export DEFAULT_PROMPT_COMMAND
 
+if [[ -z "${DEFAULT_DEBUG_TRAP+x}" ]]; then
+    DEFAULT_DEBUG_TRAP="$(trap -p DEBUG 2>/dev/null || true)"
+    export DEFAULT_DEBUG_TRAP
+fi
+
 # --- 2. Path & Config Setup ---
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
@@ -206,6 +211,18 @@ _limon_is_active() {
     [[ "${PROMPT_COMMAND:-}" == *"limon_runner"* ]]
 }
 
+_limon_preexec() {
+    [[ "${__LIMON_IN_PROMPT:-0}" == "1" ]] && return 0
+    [[ "${BASH_COMMAND:-}" == "limon_runner"* ]] && return 0
+    [[ "${BASH_COMMAND:-}" == "__LIMON_IN_PROMPT="* ]] && return 0
+    [[ "${BASH_COMMAND:-}" == "_limon_preexec"* ]] && return 0
+
+    if [[ "${__LIMON_CMD_ACTIVE:-0}" != "1" ]]; then
+        __LIMON_CMD_START=$SECONDS
+        __LIMON_CMD_ACTIVE=1
+    fi
+}
+
 # --- Phase 9: Trust & diagnostics ---
 _limon_validate_theme_file() {
     local file="$1"
@@ -333,11 +350,21 @@ _limon_do_health() {
         fi
     fi
 
-    if trap -p DEBUG 2>/dev/null | grep -q .; then
-        _limon_health_msg WARN "DEBUG trap is set (limon does not use DEBUG)"
+    local debug_trap
+    debug_trap="$(trap -p DEBUG 2>/dev/null || true)"
+    if _limon_is_active && [[ "$debug_trap" == *"_limon_preexec"* ]]; then
+        _limon_health_msg OK "DEBUG trap installed for command timing"
+    elif _limon_is_active && [[ -n "$debug_trap" ]]; then
+        _limon_health_msg WARN "DEBUG trap is set by another tool (command timer may be inaccurate)"
+        ((warnings++)) || true
+    elif _limon_is_active; then
+        _limon_health_msg WARN "DEBUG trap missing (command timer unavailable)"
+        ((warnings++)) || true
+    elif [[ "$debug_trap" == *"_limon_preexec"* ]]; then
+        _limon_health_msg WARN "limon DEBUG trap still set while prompt is off"
         ((warnings++)) || true
     else
-        _limon_health_msg OK "no DEBUG trap"
+        _limon_health_msg OK "no command timing trap"
     fi
 
     if [[ -r "$SCRIPT_DIR/limon.sh" ]]; then
@@ -1006,9 +1033,13 @@ _limon_do_preview() {
 _limon_restore_session() {
     export PS1="$DEFAULT_PS1"
     PROMPT_COMMAND="${DEFAULT_PROMPT_COMMAND:-}"
-    trap - DEBUG 2>/dev/null || true
+    if [[ -n "${DEFAULT_DEBUG_TRAP:-}" ]]; then
+        eval "$DEFAULT_DEBUG_TRAP"
+    else
+        trap - DEBUG 2>/dev/null || true
+    fi
     unset timer LAST_EXIT_CODE 2>/dev/null || true
-    unset __LIMON_CMD_START __LIMON_CMD_ELAPSED \
+    unset __LIMON_CMD_START __LIMON_CMD_ELAPSED __LIMON_CMD_ACTIVE __LIMON_IN_PROMPT \
           __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
           __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
@@ -1355,12 +1386,13 @@ export -f main
 # --- 7. Runner ---
 limon_runner() {
     LAST_EXIT_CODE=$?
-    if [[ -n "${__LIMON_CMD_START:-}" ]]; then
+    __LIMON_IN_PROMPT=1
+    if [[ "${__LIMON_CMD_ACTIVE:-0}" == "1" && -n "${__LIMON_CMD_START:-}" ]]; then
         __LIMON_CMD_ELAPSED=$((SECONDS - __LIMON_CMD_START))
     else
         __LIMON_CMD_ELAPSED=0
     fi
-    __LIMON_CMD_START=$SECONDS
+    __LIMON_CMD_ACTIVE=0
     if [[ "${LIMON_METRICS:-0}" == "1" ]]; then
         local __limon_a __limon_b
         _limon_clock_us; __limon_a="$__LIMON_T"
@@ -1374,8 +1406,10 @@ limon_runner() {
     else
         main "$LIMON_THEME_ARG"
     fi
+    __LIMON_IN_PROMPT=0
 }
 export -f limon_runner
+export -f _limon_preexec
 export -f _limon_clock_us
 
 # Only 'limon on' changes the live theme. Other subcommands (status, config,
@@ -1389,13 +1423,14 @@ fi
 
 case "$SUBCOMMAND" in
     on)
-        __LIMON_CMD_START=$SECONDS
         PROMPT_COMMAND="limon_runner${DEFAULT_PROMPT_COMMAND:+; $DEFAULT_PROMPT_COMMAND}"
         LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
         __LIMON_CMD_ELAPSED=0
+        __LIMON_CMD_ACTIVE=0
         limon_runner
         _limon_load_hints
         _limon_maybe_autoupdate
+        trap '_limon_preexec' DEBUG
         ;;
     upgrade|update)
         _limon_do_upgrade "${1:-}"
