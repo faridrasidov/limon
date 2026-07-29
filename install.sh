@@ -208,7 +208,7 @@ do_uninstall() {
     done
 
     # Remove installed files from every known location we can write to.
-    local dir removed=0
+    local dir removed=0 install_dir="$TARGET_DIR"
     for dir in "$SYSTEM_DIR" "$USER_DIR" "$SOURCE_DIR"; do
         [[ -e "$dir/limon.sh" ]] || continue
         # Never delete the repo you're running from if it isn't an install dir.
@@ -216,7 +216,7 @@ do_uninstall() {
             continue
         fi
         if _need_root_for "$dir"; then
-            rm -rf "$dir"
+            rm -rf "$install_dir"
             echo "limon-install: removed $dir"
             removed=1
         else
