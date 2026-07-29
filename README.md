@@ -17,8 +17,8 @@ Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? H
 * 🎨 **256-Color Modular Themes:** Choose from 11 built-in themes (Limon, Dracula, Nord, Neon, and more) or easily create your own with the built-in color picker.
 * ⏱️ **Smart Execution Timer:** Automatically displays how long a command took to run (only appears if the command takes longer than 2 seconds).
 * 🌿 **Git Branch in Prompt:** See branch, staged/unstaged/untracked counts (`+N ~N ?N` in verbose mode), merge/rebase state, stash count (`≡N`), detached HEAD warning, and ahead/behind `(↑/↓)`.
-* 🔒 **Context-Aware Directories:** * Directories you don't have write access to are marked with a `🔒` and colored gray.
-  * Warns you visually when operating as the `root` user outside of safe directories.
+* 🔒 **Context-Aware Directories:** Directories you don't have write access to are marked with a `🔒` and colored gray.
+  * Optional root warning is available with `limon config show_root=1`.
 * 🐍 **Environment Support:** Automatically detects and displays active `Python venv`, `Conda`, and `Docker` environments.
 
 ---
@@ -144,7 +144,7 @@ export LIMON_ENV=prod   # Label this shell as production (use with env_banner=1)
 
 Colors automatically disable when `TERM=dumb` or output is not a TTY (safe for logs and `script`).
 
-**Identity & safety:** `host_color=auto` (default) gives each hostname a distinct color. `show_root` and `show_sudo` warn when running as root or when sudo credentials are cached.
+**Identity & safety:** `host_color=off` (default) keeps the theme's host color. Enable `host_color=auto` if you want each hostname to get a distinct color. `show_root=0` (default) keeps root warnings hidden; enable `show_root=1` if you want a ROOT banner. `show_sudo` warns when sudo credentials are cached.
 
 *(Note: Limon remembers your last used theme automatically!)*
 

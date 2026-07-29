@@ -60,9 +60,9 @@ LIMON_AUTOUPDATE=off
 LIMON_CHANNEL=stable
 LIMON_ASCII=0
 LIMON_MAX_PATH=0
-LIMON_HOST_COLOR=auto
+LIMON_HOST_COLOR=off
 LIMON_ENV_BANNER=0
-LIMON_SHOW_ROOT=1
+LIMON_SHOW_ROOT=0
 LIMON_SHOW_SUDO=1
 LIMON_K8S=0
 LIMON_CLOUD=0
@@ -130,9 +130,9 @@ _limon_load_config() {
     LIMON_CHANNEL=stable
     LIMON_ASCII=0
     LIMON_MAX_PATH=0
-    LIMON_HOST_COLOR=auto
+    LIMON_HOST_COLOR=off
     LIMON_ENV_BANNER=0
-    LIMON_SHOW_ROOT=1
+    LIMON_SHOW_ROOT=0
     LIMON_SHOW_SUDO=1
     LIMON_K8S=0
     LIMON_CLOUD=0
@@ -194,9 +194,9 @@ _limon_conf_flags() {
     [[ "$LIMON_CHANNEL" != "stable" ]] && flags+=("-channel=$LIMON_CHANNEL")
     [[ "$LIMON_ASCII" != "0" ]] && flags+=("-ascii=$LIMON_ASCII")
     [[ "$LIMON_MAX_PATH" != "0" ]] && flags+=("-max_path=$LIMON_MAX_PATH")
-    [[ "$LIMON_HOST_COLOR" != "auto" ]] && flags+=("-host_color=$LIMON_HOST_COLOR")
+    [[ "$LIMON_HOST_COLOR" != "off" ]] && flags+=("-host_color=$LIMON_HOST_COLOR")
     [[ "$LIMON_ENV_BANNER" != "0" ]] && flags+=("-env_banner=$LIMON_ENV_BANNER")
-    [[ "$LIMON_SHOW_ROOT" != "1" ]] && flags+=("-show_root=$LIMON_SHOW_ROOT")
+    [[ "$LIMON_SHOW_ROOT" != "0" ]] && flags+=("-show_root=$LIMON_SHOW_ROOT")
     [[ "$LIMON_SHOW_SUDO" != "1" ]] && flags+=("-show_sudo=$LIMON_SHOW_SUDO")
     [[ "$LIMON_K8S" != "0" ]] && flags+=("-k8s=$LIMON_K8S")
     [[ "$LIMON_CLOUD" != "0" ]] && flags+=("-cloud=$LIMON_CLOUD")
@@ -518,7 +518,7 @@ _limon_prompt_symbol() {
 
 # --- Phase 6: Identity & safety helpers ---
 _limon_host_color_code() {
-    local mode="${LIMON_HOST_COLOR:-auto}"
+    local mode="${LIMON_HOST_COLOR:-off}"
     local host="${HOSTNAME:-$(hostname 2>/dev/null)}"
 
     if [[ "$mode" == "off" || "$mode" == "0" ]]; then
@@ -582,7 +582,7 @@ _limon_safety_prefix() {
     local col_err="$2"
     local prefix=""
 
-    if [[ "${EUID}" -eq 0 && "${LIMON_SHOW_ROOT:-1}" == "1" ]]; then
+    if [[ "${EUID}" -eq 0 && "${LIMON_SHOW_ROOT:-0}" == "1" ]]; then
         prefix+="${col_err}[${__LIMON_SYM_WARN} ROOT]${c_reset} "
     fi
 
@@ -1724,11 +1724,12 @@ Safe rendering:
     Colors auto-disable when TERM=dumb or output is not a TTY
 
 Identity & safety:
-    limon config host_color=auto    Hash hostname to a distinct color (default)
-    limon config host_color=off     Use theme host color instead
+    limon config host_color=off     Use theme host color instead (default)
+    limon config host_color=auto    Hash hostname to a distinct color
     export LIMON_ENV=prod           Set environment label (prod/staging/dev)
     limon config env_banner=1       Show colored PROD/STAGING banner when LIMON_ENV is set
-    limon config show_root=1        Show ROOT warning when running as root (default)
+    limon config show_root=1        Show ROOT warning when running as root
+    limon config show_root=0        Hide ROOT warning (default)
     limon config show_sudo=1        Show (sudo) when cached sudo credentials exist (default)
     limon config cloud=1            Show AWS_PROFILE when set
     limon config k8s=1              Show kubectl current-context (cached 2s)
@@ -1757,7 +1758,7 @@ Performance metrics:
     (render time is wall-clock; needs bash 5+ or GNU date for sub-ms precision)
 
 Config file: $LIMON_CONF
-  Example: neon -env_banner=1 -host_color=auto -cloud=1 -k8s=1
+  Example: neon -env_banner=1 -host_color=auto -show_root=1 -cloud=1 -k8s=1
 "
         ;;
 esac
