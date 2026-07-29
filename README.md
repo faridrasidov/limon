@@ -203,6 +203,8 @@ limon upgrade
 
 This runs a safe fast-forward `git pull` in your Limon install directory and tells you when it's done. After updating, run `limon on` (or open a new terminal) to load the new version.
 
+See [CHANGELOG.md](CHANGELOG.md) for notable changes in each release.
+
 > If Limon is installed in a system directory like `/usr/share/limon`, you may need elevated permissions. Limon will detect this and suggest:
 > ```bash
 > sudo git -C /usr/share/limon pull --ff-only
