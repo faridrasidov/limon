@@ -100,4 +100,56 @@ assert_contains "$(cat "$LIMON_REPO_ROOT/README.md")" "get-limon.sh"
 it "get-limon.sh and install.sh agree on the bash floor"
 assert_contains "$(head -50 "$GET")" "BASH_VERSINFO"
 
+# --- release workflow invariants ---------------------------------------------
+#
+# The workflow only ever runs on a tag push, so it cannot be exercised here.
+# These are structural checks on the properties that are easy to regress and
+# expensive to discover at tag time.
+
+WORKFLOW="$LIMON_REPO_ROOT/.github/workflows/release.yml"
+
+it "the release workflow exists"
+assert_ok test -f "$WORKFLOW"
+
+it "the release workflow triggers on version tags"
+assert_contains "$(cat "$WORKFLOW")" 'tags: ["v*"]'
+
+it "the version guard compares against the base version, not the raw tag"
+# A pre-release tag (v1.1.0-rc1) must still match LIMON_VERSION=1.1.0, or the
+# recommended dry run fails on the guard rather than on anything real.
+assert_contains "$(cat "$WORKFLOW")" 'base="${version%%-*}"'
+
+it "the release workflow marks pre-release tags as pre-releases"
+assert_contains "$(cat "$WORKFLOW")" -- "--prerelease"
+
+it "the release workflow publishes with the bundled gh CLI"
+# No third-party action, so a repo policy restricting them cannot break
+# publishing.
+assert_contains "$(cat "$WORKFLOW")" "gh release create"
+
+it "the release workflow checks out the ref being released"
+assert_contains "$(cat "$WORKFLOW")" 'ref: ${{ github.event.inputs.tag || github.ref }}'
+
+it "the release workflow verifies the archive installs before publishing"
+assert_contains "$(cat "$WORKFLOW")" "Verify the archive installs"
+
+it "the release workflow runs the test suite"
+assert_contains "$(cat "$WORKFLOW")" "bash tests/run.sh"
+
+# The version-resolution rule the workflow uses, checked against the cases that
+# matter. Kept in step with the workflow by the grep above.
+resolve_base() { local v="${1#v}"; printf '%s' "${v%%-*}"; }
+
+it "a plain tag resolves to itself"
+assert_eq "1.1.0" "$(resolve_base v1.1.0)"
+
+it "a release-candidate tag resolves to its base version"
+assert_eq "1.1.0" "$(resolve_base v1.1.0-rc1)"
+
+it "a beta tag with a dotted suffix resolves to its base version"
+assert_eq "2.0.0" "$(resolve_base v2.0.0-beta.2)"
+
+it "a double-digit minor version survives resolution"
+assert_eq "1.10.3" "$(resolve_base v1.10.3)"
+
 finish
