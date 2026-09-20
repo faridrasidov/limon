@@ -14,7 +14,7 @@
 # limon - Optimized Bash Prompt
 # Features: 256-Color ANSI Support, Color Picker, Silent Default, Modular Themes
 
-LIMON_VERSION="1.0.0"
+LIMON_VERSION="1.1.0"
 
 # --- 0. Bash version gate ---
 #
@@ -92,6 +92,9 @@ LIMON_SHOW_EXIT=0
 LIMON_EXIT_HINTS=0
 LIMON_SHOW_CLOCK=0
 LIMON_METRICS=0
+
+# The one-line install command, shown wherever a non-git install needs updating.
+LIMON_INSTALL_ONELINER='curl -fsSL https://raw.githubusercontent.com/faridrasidov/limon/master/get-limon.sh | bash'
 
 LIMON_UPDATE_STAMP="$LIMON_CONF_DIR/.last_update_check"
 LIMON_UPDATE_FLAG="$LIMON_CONF_DIR/.update_available"
@@ -416,6 +419,11 @@ _limon_do_health() {
             _limon_health_msg WARN "git install not writable (use sudo for limon upgrade)"
             ((warnings++)) || true
         fi
+    else
+        # Not a failure — a tarball install is perfectly fine, it just updates
+        # differently. Saying nothing here left users guessing.
+        _limon_health_msg OK "not a git install ('limon upgrade' unavailable)"
+        _limon_health_msg "" "update with: $LIMON_INSTALL_ONELINER"
     fi
 
     local hp_theme="${LIMON_THEME_ARG:-${saved_theme:-default}}" hp_ps1="$PS1" hp_t0 hp_t1 hp_n=20 hp_i
@@ -1058,10 +1066,10 @@ _limon_do_upgrade() {
         return 1
     fi
     if [[ ! -d "$SCRIPT_DIR/.git" ]]; then
-        echo "limon: not a git installation ($SCRIPT_DIR)." >&2
-        echo "limon: to enable upgrades, reinstall from a clone:" >&2
-        echo "limon:   git clone https://github.com/faridrasidov/limon" >&2
-        echo "limon:   cd limon && bash install.sh   # add --system for all users" >&2
+        echo "limon: this copy cannot update itself ($SCRIPT_DIR is not a git install)." >&2
+        echo "limon: to update, run the installer again:" >&2
+        echo "limon:   $LIMON_INSTALL_ONELINER" >&2
+        echo "limon: that also restores 'limon upgrade' if git is available." >&2
         return 1
     fi
     if [[ ! -w "$SCRIPT_DIR/.git" ]]; then
@@ -1854,7 +1862,8 @@ case "$SUBCOMMAND" in
             echo "Install: $SCRIPT_DIR (git — upgradable)"
             echo "Channel: $LIMON_CHANNEL (branch: $status_branch)"
         else
-            echo "Install: $SCRIPT_DIR (not a git install — 'limon upgrade' unavailable)"
+            echo "Install: $SCRIPT_DIR (not a git install — update by re-running the installer)"
+            echo "Update:  $LIMON_INSTALL_ONELINER"
             echo "Channel: $LIMON_CHANNEL (not a git install)"
         fi
         if [[ -f "$LIMON_UPDATE_FLAG" ]]; then

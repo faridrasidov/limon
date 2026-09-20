@@ -97,6 +97,17 @@ else
 fi
 
 # --- Helpers ---
+# Unicode is fine on a real terminal but turns into noise in a log or on a
+# dumb terminal, so fall back to plain ASCII in those cases.
+if [[ -t 1 && "${TERM:-}" != "dumb" && -n "${TERM:-}" ]]; then
+    OK_MARK="✓"
+else
+    OK_MARK="[ok]"
+fi
+
+# The one-line install/update command, quoted in several messages below.
+ONELINER='curl -fsSL https://raw.githubusercontent.com/faridrasidov/limon/master/get-limon.sh | bash'
+
 _need_root_for() {
     # Returns 0 if we can write to the given path (creating it if needed).
     # Walks up to the nearest existing ancestor to test writability.
@@ -139,8 +150,13 @@ _strip_rc() {
     local tmp
     tmp="$(mktemp)"
     # 1) Drop the marker block. 2) Drop legacy limon-specific lines.
+    #
+    # grep exits 1 when it selects no lines, which under `set -euo pipefail`
+    # aborts the whole uninstall before anything is removed. That happens
+    # whenever the rc file contained nothing but the Limon block — the normal
+    # case when the installer created it. Absorb the status here.
     sed "/$LIMON_BEGIN/,/$LIMON_END/d" "$rc" \
-        | grep -vE '^alias limon=|hint-limon\.sh|^limon on$' > "$tmp"
+        | { grep -vE '^alias limon=|hint-limon\.sh|^limon on$' || true; } > "$tmp"
     cat "$tmp" > "$rc"
     rm -f "$tmp"
     echo "limon-install: cleaned Limon entries from $rc"
@@ -182,6 +198,8 @@ do_install() {
             cp -f "$SOURCE_DIR/themes/"*.theme "$TARGET_DIR/themes/" 2>/dev/null || true
         fi
         echo "limon-install: copied runtime files (no .git found — 'limon upgrade' unavailable)"
+        echo "limon-install: to update later, re-run the installer:"
+        echo "limon-install:     $ONELINER"
     fi
 
     # chmod +x on install.sh (or similar) must not block future `limon upgrade` pulls.
@@ -201,12 +219,30 @@ do_install() {
         printf '%s\n' "$LIMON_END"
     } >> "$RC_FILE"
 
-    echo "limon-install: done."
-    echo "limon-install: installed to $TARGET_DIR"
-    echo "limon-install: added startup entries to $RC_FILE"
-    echo "limon-install: open a new terminal, or run the line below to enable Limon"
-    echo "limon-install: (prompt + tab-completion) in this shell right now:"
-    echo "limon-install:     source \"$RC_FILE\""
+    # Show "~/.bashrc" rather than the full path — it is what the user will
+    # recognise and type. The "~" here is literal display text, not a path.
+    local rc_display="$RC_FILE"
+    # shellcheck disable=SC2088
+    [[ -n "${HOME:-}" && "$rc_display" == "$HOME/"* ]] && rc_display="~/${RC_FILE#"$HOME"/}"
+
+    echo
+    echo "$OK_MARK Limon is installed."
+    echo
+    echo "  Open a new terminal to see it, or run:"
+    echo "      source $rc_display"
+    echo
+    echo "  Try a different look:  limon themes"
+    echo "                         limon on nord"
+    echo "  Turn it off anytime:   limon off"
+    echo "  Remove it completely:  limon uninstall"
+    echo
+
+    if [[ ! -d "$TARGET_DIR/.git" ]]; then
+        echo "  Note: this copy cannot update itself with 'limon upgrade'."
+        echo "  To update later, run this again:"
+        echo "      $ONELINER"
+        echo
+    fi
 }
 
 # --- Uninstall ---
@@ -220,7 +256,13 @@ do_uninstall() {
     done
 
     # Remove installed files from every known location we can write to.
-    local dir removed=0 install_dir="$TARGET_DIR"
+    #
+    # Delete "$dir" — the directory we just confirmed holds limon.sh — and not
+    # "$TARGET_DIR", which is derived from the scope flag and can point
+    # somewhere else entirely. Running `--uninstall` as root with no scope flag
+    # defaults TARGET_DIR to the system path, so a user install was reported as
+    # removed while the system path was deleted instead.
+    local dir removed=0
     for dir in "$SYSTEM_DIR" "$USER_DIR" "$SOURCE_DIR"; do
         [[ -e "$dir/limon.sh" ]] || continue
         # Never delete the repo you're running from if it isn't an install dir.
@@ -228,7 +270,7 @@ do_uninstall() {
             continue
         fi
         if _need_root_for "$dir"; then
-            rm -rf "$install_dir"
+            rm -rf "$dir"
             echo "limon-install: removed $dir"
             removed=1
         else
@@ -257,8 +299,10 @@ do_uninstall() {
         fi
     fi
 
-    echo "limon-install: uninstall complete."
-    echo "limon-install: open a new terminal to fully restore your default prompt."
+    echo
+    echo "$OK_MARK Limon has been removed."
+    echo "  Open a new terminal to get your original prompt back."
+    echo
 }
 
 case "$ACTION" in
