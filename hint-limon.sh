@@ -13,6 +13,9 @@
 
 _LIMON_HINT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
+# compgen output is deliberately word-split into COMPREPLY, the standard bash
+# completion idiom.
+# shellcheck disable=SC2207
 _limon_autocomplete() {
     local cur prev
     COMPREPLY=()
