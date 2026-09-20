@@ -19,6 +19,18 @@
 #
 set -euo pipefail
 
+# --- Bash version gate ---
+# Limon itself needs bash 4.0+, so refuse to install under an older one rather
+# than wiring a prompt into the user's startup files that cannot run.
+if [[ -z "${BASH_VERSINFO[0]:-}" ]] || (( BASH_VERSINFO[0] < 4 )); then
+    echo "limon: requires bash 4.0 or newer (found ${BASH_VERSION:-unknown})." >&2
+    if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+        echo "limon: macOS ships bash 3.2 as /bin/bash. Try: brew install bash" >&2
+        echo "limon: then re-run this installer with the newer bash." >&2
+    fi
+    exit 1
+fi
+
 # --- Constants ---
 LIMON_BEGIN="# >>> limon >>>"
 LIMON_END="# <<< limon <<<"

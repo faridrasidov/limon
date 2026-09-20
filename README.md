@@ -4,7 +4,9 @@
 
 Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? Hate having to install special "patched" Nerd Fonts just to see a Git branch in your prompt? Limon is built differently. It uses built-in Bash features to deliver a beautiful, informative, and **zero-delay** custom bash prompt experience — perfect for customizing your `.bashrc` / `bashrc` prompt on any system.
 
-**Works on:** Linux · macOS · WSL (Windows Subsystem for Linux) · Git Bash on Windows. **Requires:** Bash (Git optional, for the git branch indicator).
+**Works on:** Linux · macOS · WSL (Windows Subsystem for Linux) · Git Bash on Windows. **Requires:** Bash 4.0 or newer (Git optional, for the git branch indicator).
+
+> **macOS note:** Apple still ships Bash 3.2 as `/bin/bash`. Install a current one with `brew install bash` and use that shell — Limon checks the version at startup and tells you if it's too old rather than failing cryptically.
 
 ![Limon bash prompt showing git branch, 256-color theme, and command execution timer in a Linux terminal](https://raw.github.com/FaridRasidov/limon/master/example.png)
 
@@ -15,7 +17,7 @@ Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? H
 * ⚡ **Blazing Fast:** Written purely in Bash. No Python interpreters or heavy background processes slowing down your Enter key — a truly lightweight, fast terminal prompt.
 * 🔤 **No Patched Fonts Required:** Uses standard, universal Unicode symbols. It looks perfect out-of-the-box on any OS or font.
 * 🎨 **256-Color Modular Themes:** Choose from 11 built-in themes (Limon, Dracula, Nord, Neon, and more) or easily create your own with the built-in color picker.
-* ⏱️ **Smart Execution Timer:** Automatically displays how long a command took to run (only appears if the command takes longer than 2 seconds).
+* ⏱️ **Smart Execution Timer:** Automatically displays how long a command took to run, with sub-second precision (`1.4s`, `2m 05s`, `1h 02m 05s`). Only appears past a threshold you set — 2 seconds by default, and `limon config timer_threshold=0.5` accepts fractions.
 * 🌿 **Git Branch in Prompt:** See branch, staged/unstaged/untracked counts (`+N ~N ?N` in verbose mode), merge/rebase state, stash count (`≡N`), detached HEAD warning, and ahead/behind `(↑/↓)`.
 * 🔒 **Context-Aware Directories:** Directories you don't have write access to are marked with a `🔒` and colored gray.
   * Optional root warning is available with `limon config show_root=1`.
@@ -132,7 +134,8 @@ limon config git=verbose # Detailed +N staged, ~N modified, ?N untracked
 limon config show_exit=1 # Show exit code on failure (e.g. x127 $)
 limon config exit_hints=1 # Add hints like x130(SIGINT) when show_exit=1
 limon config clock=1    # Show HH:MM before the command timer (off by default)
-limon config timer_threshold=3
+limon config timer_threshold=3    # Only show the timer past 3 seconds
+limon config timer_threshold=0.5  # Fractions are allowed
 limon config show_ssh=1 # Show an [ssh] tag on remote sessions (off by default)
 limon config ascii=1    # Use ASCII symbols (# > ^ v) for dumb terminals
 limon config max_path=40 # Truncate long paths (e.g. ~/…/project/src)
@@ -157,8 +160,9 @@ Limon is built for speed, and you can measure it. Limon can report how long it t
 **Benchmark the prompt render time:**
 
 ```bash
-limon bench        # Average render time over 100 runs
-limon bench 500    # More iterations for a steadier average
+limon bench              # Average render time over 100 runs
+limon bench 500          # More iterations for a steadier average
+limon bench --breakdown  # Per-segment timings, to see where the time goes
 ```
 
 Example output:
@@ -183,6 +187,25 @@ limon config metrics=0   # Turn it back off (default)
 ```
 
 `limon health` also includes a quick render-time and memory line.
+
+**Where the time goes:**
+
+```
+$ limon bench --breakdown
+Limon prompt benchmark — per segment
+  theme: default, git mode: full, 200 iterations each
+
+  theme (cached)         0.068 ms
+  git info               0.065 ms
+  safety prefix          0.032 ms
+  path                   0.020 ms
+  prompt symbol          0.028 ms
+  host color             0.014 ms
+  symbols                0.014 ms
+
+  segments total         0.241 ms
+  whole render           0.363 ms
+```
 
 > **Notes:**
 > - Render time is **wall-clock** time spent building the prompt. Sub-millisecond precision needs **bash 5+** (uses `$EPOCHREALTIME`, no subprocess) or **GNU `date`**.
@@ -389,6 +412,34 @@ Limon has three update channels mapped to git branches: `stable` (master), `beta
 
 **How do I remove or disable Limon?**
 To temporarily disable it, run `limon off` to instantly restore your system's default prompt. To uninstall it completely, run `limon uninstall` (or `./install.sh --uninstall`) — it removes the startup entries and installed files, and asks whether to keep or delete your `~/.config/limon` configuration.
+
+---
+
+## 🧪 Development & Testing
+
+Limon ships a dependency-free test suite written in plain Bash — no `bats`, no package manager, nothing to install.
+
+```shell
+bash tests/run.sh              # run everything
+bash tests/run.sh git          # run only files matching "git"
+bash tests/bench_guard.sh      # check prompt render time against a ceiling
+```
+
+Each test file runs in its own Bash process with an isolated `HOME` and `XDG_CONFIG_HOME`, so your real configuration and themes are never touched.
+
+Linting uses [ShellCheck](https://www.shellcheck.net/):
+
+```shell
+shellcheck -S warning limon.sh install.sh hint-limon.sh tests/*.sh
+```
+
+Both run automatically in CI on every push and pull request, across Bash 4.4, 5.0, and 5.2.
+
+To load Limon's functions without installing the prompt (useful when writing tests):
+
+```shell
+LIMON_SOURCE_ONLY=1 source ./limon.sh
+```
 
 ---
 
