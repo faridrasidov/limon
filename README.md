@@ -27,26 +27,72 @@ Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? H
 
 ## 🚀 Installation (Linux, macOS, WSL & Git Bash)
 
-### Quick install (recommended)
+### Install with one command
 
-The included `install.sh` script copies Limon into place and wires it into your shell startup automatically.
+Paste this into your terminal and press Enter:
+
+```shell
+curl -fsSL https://raw.githubusercontent.com/faridrasidov/limon/master/get-limon.sh | bash
+```
+
+That's it. Open a new terminal and Limon is on.
+
+**What it does:** downloads Limon into `~/.local/share/limon` and adds a few
+lines to your `~/.bashrc` so the prompt loads when you open a terminal. It
+touches nothing outside your home directory and never needs `sudo`. To remove
+all of it later, run `limon uninstall`.
+
+Useful options — pass them after `bash -s --`:
+
+```shell
+# Install for every user on the machine (needs sudo)
+curl -fsSL https://raw.githubusercontent.com/faridrasidov/limon/master/get-limon.sh | sudo bash -s -- --system
+
+# Install a specific release
+curl -fsSL https://raw.githubusercontent.com/faridrasidov/limon/master/get-limon.sh | bash -s -- --version 1.1.0
+```
+
+> **Requires Bash 4.0 or newer.** macOS still ships Bash 3.2 as `/bin/bash`;
+> install a current one with `brew install bash` and use that shell. The
+> installer checks this first and tells you if your Bash is too old, rather
+> than half-installing something that cannot run.
+
+### Prefer to download it yourself?
+
+Reasonable — piping a script into `bash` means trusting it sight unseen. Grab
+the release, read it, then run it:
+
+1. Download `limon-<version>.tar.gz` (or `.zip`) and `SHA256SUMS` from the
+   [Releases page](https://github.com/faridrasidov/limon/releases).
+2. Check the download is intact:
+   ```shell
+   sha256sum -c SHA256SUMS --ignore-missing
+   ```
+3. Unpack and install:
+   ```shell
+   tar -xzf limon-<version>.tar.gz
+   bash limon-<version>/install.sh
+   ```
+
+The `.zip` is there for Git Bash on Windows, where `tar` may be missing.
+
+### From source
+
+Use this if you want to contribute, or to follow the `beta` / `dev` update
+channels — those need a Git checkout, because `limon upgrade` tracks a branch.
 
 ```shell
 git clone https://github.com/faridrasidov/limon
 cd limon
-
-# Install for the current user (no sudo needed):
-bash install.sh
-
-# ...or install system-wide for all users:
-sudo bash install.sh --system
+bash install.sh              # add --system for all users
 ```
 
-Then open a new terminal (or `source ~/.bashrc`) and Limon is on. The installer is **idempotent** — re-running it (or `limon upgrade`) safely refreshes the install without creating duplicate entries.
+The installer is **idempotent** — re-running it (or `limon upgrade`) refreshes
+the install without creating duplicate entries in your `.bashrc`.
 
 ### Manual install (alternative)
 
-Prefer to do it by hand? The steps the installer automates are:
+Prefer to wire it up by hand? The steps the installer automates are:
 
 ```shell
 git clone https://github.com/faridrasidov/limon
@@ -70,6 +116,23 @@ source ~/.bashrc
 echo 'limon on' | sudo tee -a /etc/bash.bashrc
 source /etc/bash.bashrc
 ```
+
+---
+
+## ⬆️ Upgrading from 1.0.0
+
+Nothing to migrate — your config file and any themes you wrote keep working as
+they are. Run `limon upgrade`, or re-run the one-line installer.
+
+Two things to know before you do, both covered in full in
+[CHANGELOG.md](CHANGELOG.md):
+
+- **Bash 4.0+ is now required and enforced.** If you are on macOS's stock
+  `/bin/bash` (3.2), Limon will refuse to start and tell you how to fix it.
+  It never really worked there — it installed the prompt but silently failed to
+  save your settings.
+- **The command timer now shows fractions** (`1.4s` instead of `1s`), and
+  `limon config timer_threshold=` accepts decimals like `0.5`.
 
 ---
 

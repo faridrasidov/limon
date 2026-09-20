@@ -9,17 +9,69 @@ The format follows a simple, release-oriented structure:
 - `Fixed` for bug fixes.
 - `Docs` for documentation-only changes.
 
-## Unreleased
+## 1.1.0 - 2026-09-20
+
+### Upgrade notes
+
+- **Bash 4.0 or newer is now required**, and Limon checks for it at startup
+  instead of failing somewhere deep in the script. macOS ships Bash 3.2 as
+  `/bin/bash`; install a current one with `brew install bash` and use that
+  shell. Limon never fully worked on 3.2 — it installed the prompt but silently
+  failed to persist config options — so this names a broken setup rather than
+  dropping a working one.
+- `LIMON_*` configuration options are no longer exported into child processes.
+  Nothing documented relied on this, but a script reading e.g. `$LIMON_GIT_MODE`
+  from a subprocess started by your shell will no longer see it.
+- `timer_threshold` now rejects values it used to accept silently. If your
+  config has a non-numeric value there, Limon falls back to the 2 second
+  default and `limon config timer_threshold=...` will tell you why.
+
+### Added
+
+- A dependency-free test suite (`bash tests/run.sh`) and CI running it on Bash
+  4.4, 5.0 and 5.2 alongside ShellCheck and a prompt render-time guard.
+- `limon bench --breakdown` reports per-segment render timings, so a slowdown
+  can be attributed instead of guessed at.
+- Sub-second command timer: durations now render as `1.4s`, `2m 05s` or
+  `1h 02m 05s`. Bash 4 has no fork-free high-resolution clock, so those shells
+  keep whole-second timing rather than paying a `date` call before every
+  command.
+- `timer_threshold` accepts fractions, e.g. `limon config timer_threshold=0.5`.
+- `LIMON_SOURCE_ONLY=1` loads Limon's functions without parsing a subcommand or
+  installing the prompt, for testing and debugging.
 
 ### Changed
 
-- Default `host_color` is now `off`, so Limon uses the selected theme's host color unless the user enables automatic hostname coloring with `limon config host_color=auto`.
-- Default `show_root` is now `0`, so the ROOT warning banner is opt-in with `limon config show_root=1`.
+- Prompt rendering is roughly 70 times faster — about 21 ms per prompt down to
+  about 0.3 ms. The theme file was being re-validated and re-sourced on every
+  keypress, and every prompt segment was assembled through a subshell. Themes
+  are now cached, and the segments no longer fork.
+- `limon reload` re-sources Limon, so a shell left open across `limon upgrade`
+  picks up the new code instead of silently running the old prompt renderer.
+- Default `host_color` is now `off`, so Limon uses the selected theme's host
+  color unless you enable automatic hostname coloring with
+  `limon config host_color=auto`.
+- Default `show_root` is now `0`, so the ROOT warning banner is opt-in with
+  `limon config show_root=1`.
 
 ### Fixed
 
-- Command timing now starts only when Bash is about to execute a real command, so idle time at the prompt is not counted as command duration.
-- `limon off` restores a pre-existing DEBUG trap instead of always clearing it.
+- `limon config max_path=N` with a small `N` could hang the shell on every
+  prompt. The path-shortening loop could never make progress, so the prompt
+  never returned.
+- `limon off` left its `DEBUG` trap installed, so Limon's timing hook kept
+  running on every command in a shell you had turned Limon off in. The trap is
+  now disarmed. Note that Bash does not let a sourced script see the caller's
+  `DEBUG` trap, so `limon off` cannot restore a trap you had set before
+  `limon on` — it clears Limon's instead of putting yours back.
+- Limon failed with "unbound variable" errors in shells using `set -u`.
+- Limon exported a shell function named `main` into every child process, where
+  a script calling `main` before defining it would run Limon's prompt renderer
+  instead of its own entry point.
+- Command timing starts only when Bash is about to run a real command, so idle
+  time spent sitting at the prompt is no longer counted as command duration.
+- On Bash 4, where timing has whole-second resolution, the timer rendered
+  `1.0s` — claiming a precision the measurement did not have. It now shows `1s`.
 
 ## 1.0.0 - 2026-07-29
 
