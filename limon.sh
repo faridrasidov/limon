@@ -16,6 +16,22 @@
 
 LIMON_VERSION="1.0.0"
 
+# --- 0. Bash version gate ---
+#
+# Limon needs bash 4.0+ (mapfile, ${var^^}). macOS still ships bash 3.2 as
+# /bin/bash, so without this check those users hit a confusing syntax or
+# "command not found" error somewhere deep in the script instead of a clear
+# message. Fail here, before anything touches PS1 or PROMPT_COMMAND.
+if [[ -z "${BASH_VERSINFO[0]:-}" ]] || (( BASH_VERSINFO[0] < 4 )); then
+    echo "limon: requires bash 4.0 or newer (found ${BASH_VERSION:-unknown})." >&2
+    if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+        echo "limon: macOS ships bash 3.2 as /bin/bash. Install a newer bash with:" >&2
+        echo "limon:   brew install bash" >&2
+        echo "limon: then make it your login shell, or run Limon under that bash." >&2
+    fi
+    return 1 2>/dev/null || exit 1
+fi
+
 # --- 1. Self-Healing & Safety ---
 if [[ "${DEFAULT_PROMPT_COMMAND:-}" == *"not found"* ]] || \
    [[ "${DEFAULT_PROMPT_COMMAND:-}" == *"limon_runner"* ]]; then
@@ -227,6 +243,16 @@ _limon_preexec() {
     [[ "${BASH_COMMAND:-}" == "_limon_preexec"* ]] && return 0
 
     if [[ "${__LIMON_CMD_ACTIVE:-0}" != "1" ]]; then
+        # $EPOCHREALTIME is a bash 5 builtin variable, so reading it costs
+        # nothing. On bash 4 there is no fork-free high-resolution clock, and
+        # this runs before every command, so fall back to whole seconds rather
+        # than forking `date` on each one.
+        if [[ -n "${EPOCHREALTIME:-}" ]]; then
+            _limon_clock_us
+            __LIMON_CMD_START_US="$__LIMON_T"
+        else
+            __LIMON_CMD_START_US=""
+        fi
         __LIMON_CMD_START=$SECONDS
         __LIMON_CMD_ACTIVE=1
     fi
@@ -395,7 +421,7 @@ _limon_do_health() {
     local hp_theme="${LIMON_THEME_ARG:-${saved_theme:-default}}" hp_ps1="$PS1" hp_t0 hp_t1 hp_n=20 hp_i
     _limon_clock_us; hp_t0="$__LIMON_T"
     if [[ -n "$hp_t0" ]]; then
-        for (( hp_i = 0; hp_i < hp_n; hp_i++ )); do main "$hp_theme" >/dev/null 2>&1; done
+        for (( hp_i = 0; hp_i < hp_n; hp_i++ )); do _limon_main "$hp_theme" >/dev/null 2>&1; done
         _limon_clock_us; hp_t1="$__LIMON_T"
         PS1="$hp_ps1"
         _limon_health_msg OK "render ~$(_limon_fmt_ms $(( (hp_t1 - hp_t0) / hp_n ))) avg over $hp_n runs (see 'limon bench')"
@@ -741,6 +767,55 @@ _limon_rss_kb() {
     [[ "$kb" =~ ^[0-9]+$ ]] && echo "$kb"
 }
 
+# Sets __LIMON_THRESHOLD_MS from LIMON_TIMER_THRESHOLD, which is expressed in
+# seconds and may carry one or more decimal places (e.g. 2, 0.5, 1.25).
+_limon_threshold_ms() {
+    local spec="${LIMON_TIMER_THRESHOLD:-2}"
+
+    if [[ "${__LIMON_THRESHOLD_FOR:-}" == "$spec" ]]; then
+        return 0
+    fi
+
+    local whole frac
+    if [[ "$spec" =~ ^([0-9]*)\.([0-9]+)$ ]]; then
+        whole="${BASH_REMATCH[1]:-0}"
+        frac="${BASH_REMATCH[2]}000"
+        frac="${frac:0:3}"
+    elif [[ "$spec" =~ ^[0-9]+$ ]]; then
+        whole="$spec"
+        frac="000"
+    else
+        whole=2
+        frac="000"
+    fi
+
+    __LIMON_THRESHOLD_MS=$(( 10#$whole * 1000 + 10#$frac ))
+    __LIMON_THRESHOLD_FOR="$spec"
+}
+
+# Sets __LIMON_ELAPSED_STR to a human-readable duration for "$1" milliseconds.
+# Under a minute it keeps one decimal place ("1.4s"); above that it switches to
+# whole seconds ("2m 03s"), where tenths stop being useful.
+_limon_format_elapsed() {
+    local ms="$1"
+    (( ms < 0 )) && ms=0
+
+    if (( ms < 60000 )); then
+        __LIMON_ELAPSED_STR="$(( ms / 1000 )).$(( (ms % 1000) / 100 ))s"
+        return
+    fi
+
+    local total_sec=$(( ms / 1000 ))
+    local min=$(( total_sec / 60 ))
+    local sec=$(( total_sec % 60 ))
+    if (( min >= 60 )); then
+        printf -v __LIMON_ELAPSED_STR '%dh %02dm %02ds' \
+            $(( min / 60 )) $(( min % 60 )) "$sec"
+    else
+        printf -v __LIMON_ELAPSED_STR '%dm %02ds' "$min" "$sec"
+    fi
+}
+
 # Format integer microseconds as "N.NNN ms".
 _limon_fmt_ms() {
     local us="$1"
@@ -799,7 +874,7 @@ _limon_do_bench_breakdown() {
     local saved_ps1="$PS1" t0 t1 i
     _limon_clock_us; t0="$__LIMON_T"
     for (( i = 0; i < iters; i++ )); do
-        main "$theme" >/dev/null 2>&1
+        _limon_main "$theme" >/dev/null 2>&1
     done
     _limon_clock_us; t1="$__LIMON_T"
     PS1="$saved_ps1"
@@ -834,7 +909,7 @@ _limon_do_bench() {
 
     local i
     for (( i = 0; i < iters; i++ )); do
-        main "$theme" >/dev/null 2>&1
+        _limon_main "$theme" >/dev/null 2>&1
     done
 
     _limon_clock_us; t1="$__LIMON_T"
@@ -1136,7 +1211,7 @@ _limon_do_preview() {
     local theme_path
 
     LAST_EXIT_CODE=0
-    main "$theme_name"
+    _limon_main "$theme_name"
     local preview_ps1="$PS1"
     export PS1="$saved_ps1"
     LAST_EXIT_CODE="$saved_exit"
@@ -1162,7 +1237,8 @@ _limon_restore_session() {
     export PS1="${DEFAULT_PS1:-}"
     PROMPT_COMMAND="${DEFAULT_PROMPT_COMMAND:-}"
     unset timer LAST_EXIT_CODE 2>/dev/null || true
-    unset __LIMON_CMD_START __LIMON_CMD_ELAPSED __LIMON_CMD_ACTIVE __LIMON_IN_PROMPT \
+    unset __LIMON_CMD_START __LIMON_CMD_START_US __LIMON_CMD_ELAPSED \
+          __LIMON_CMD_ELAPSED_MS __LIMON_CMD_ACTIVE __LIMON_IN_PROMPT \
           __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
           __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
@@ -1210,9 +1286,10 @@ if [[ "$SUBCOMMAND" == "on" ]]; then
     fi
 fi
 
-export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
-       LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK LIMON_METRICS
+# These stay shell variables rather than environment variables: the prompt
+# renderer runs in this shell via PROMPT_COMMAND, and subshells inherit
+# shell variables anyway, so exporting them only pollutes the environment
+# of every child process.
 
 fi  # end LIMON_SOURCE_ONLY guard over sections 3-4
 
@@ -1409,7 +1486,7 @@ _limon_git_info() {
 # Resolves, validates, and sources a theme once, caching the result in
 # __LIMON_THEME_* globals.
 #
-# main() used to do this on every render: a full line-by-line regex validation
+# _limon_main() used to do this on every render: a full line-by-line regex validation
 # pass plus a `source` of the theme file for each prompt, which dominated the
 # render cost and re-printed any theme warnings on every keypress. The cache is
 # keyed on the theme name; `limon reload`, `limon edit`, and `limon config`
@@ -1459,7 +1536,7 @@ _limon_invalidate_theme_cache() {
     unset __LIMON_THEME_NAME __LIMON_THEME_FILE
 }
 
-main() {
+_limon_main() {
     local last_exit="${LAST_EXIT_CODE:-0}"
     local theme_name="${1:-default}"
 
@@ -1498,11 +1575,10 @@ main() {
     local safety_str="$__LIMON_SAFETY"
 
     local elapsed_str=""
-    if [[ ${__LIMON_CMD_ELAPSED:-0} -ge ${LIMON_TIMER_THRESHOLD:-2} ]]; then
-        local elapsed=$__LIMON_CMD_ELAPSED
-        local min=$((elapsed / 60))
-        local sec=$((elapsed % 60))
-        [[ $min -gt 0 ]] && elapsed_str=" ${min}m ${sec}s" || elapsed_str=" ${sec}s"
+    _limon_threshold_ms
+    if (( ${__LIMON_CMD_ELAPSED_MS:-0} >= __LIMON_THRESHOLD_MS )); then
+        _limon_format_elapsed "${__LIMON_CMD_ELAPSED_MS:-0}"
+        elapsed_str=" $__LIMON_ELAPSED_STR"
     fi
 
     local git_str=""
@@ -1609,7 +1685,11 @@ main() {
 
     export PS1="$ps1"
 }
-export -f main
+# Exported so it survives into the PROMPT_COMMAND context. Deliberately NOT
+# named "main": an exported function by that name is inherited by every child
+# bash process, where any script that calls main before defining it would run
+# Limon's prompt renderer instead.
+export -f _limon_main
 
 # --- 7. Runner ---
 limon_runner() {
@@ -1617,14 +1697,22 @@ limon_runner() {
     __LIMON_IN_PROMPT=1
     if [[ "${__LIMON_CMD_ACTIVE:-0}" == "1" && -n "${__LIMON_CMD_START:-}" ]]; then
         __LIMON_CMD_ELAPSED=$((SECONDS - __LIMON_CMD_START))
+        if [[ -n "${__LIMON_CMD_START_US:-}" && -n "${EPOCHREALTIME:-}" ]]; then
+            _limon_clock_us
+            __LIMON_CMD_ELAPSED_MS=$(( (__LIMON_T - __LIMON_CMD_START_US) / 1000 ))
+            (( __LIMON_CMD_ELAPSED_MS < 0 )) && __LIMON_CMD_ELAPSED_MS=0
+        else
+            __LIMON_CMD_ELAPSED_MS=$(( __LIMON_CMD_ELAPSED * 1000 ))
+        fi
     else
         __LIMON_CMD_ELAPSED=0
+        __LIMON_CMD_ELAPSED_MS=0
     fi
     __LIMON_CMD_ACTIVE=0
     if [[ "${LIMON_METRICS:-0}" == "1" ]]; then
         local __limon_a __limon_b
         _limon_clock_us; __limon_a="$__LIMON_T"
-        main "$LIMON_THEME_ARG"
+        _limon_main "$LIMON_THEME_ARG"
         _limon_clock_us; __limon_b="$__LIMON_T"
         if [[ -n "$__limon_a" && -n "$__limon_b" ]]; then
             __LIMON_RENDER_US=$(( __limon_b - __limon_a ))
@@ -1632,7 +1720,7 @@ limon_runner() {
             export __LIMON_RENDER_US
         fi
     else
-        main "$LIMON_THEME_ARG"
+        _limon_main "$LIMON_THEME_ARG"
     fi
     __LIMON_IN_PROMPT=0
 }
@@ -1688,15 +1776,26 @@ case "$SUBCOMMAND" in
     reload)
         if ! _limon_is_active; then
             echo "limon: not active (run 'limon on' first)" >&2
+        elif [[ -z "${__LIMON_RELOADING:-}" && -f "$SCRIPT_DIR/limon.sh" ]]; then
+            # Re-source the script so `reload` picks up new code, not just new
+            # config — otherwise a shell open across `limon upgrade` keeps
+            # running the old renderer. The guard stops the nested `on` from
+            # recursing back into this arm.
+            __LIMON_RELOADING=1
+            _limon_invalidate_theme_cache
+            # shellcheck source=limon.sh
+            source "$SCRIPT_DIR/limon.sh" on "$saved_theme"
+            unset __LIMON_RELOADING
         else
             unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                   __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
                   __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
             _limon_invalidate_theme_cache
             _limon_load_config
-            export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
-                   LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-                   LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK LIMON_METRICS
+            # These stay shell variables rather than environment variables: the prompt
+            # renderer runs in this shell via PROMPT_COMMAND, and subshells inherit
+            # shell variables anyway, so exporting them only pollutes the environment
+            # of every child process.
             export LIMON_THEME_ARG="$saved_theme"
             LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
             limon_runner
@@ -1788,7 +1887,14 @@ case "$SUBCOMMAND" in
         else
             config_ok=0
             case "$CONFIG_ARG" in
-                timer_threshold=*) LIMON_TIMER_THRESHOLD="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                timer_threshold=*)
+                    if [[ "${CONFIG_ARG#*=}" =~ ^[0-9]+$ || "${CONFIG_ARG#*=}" =~ ^[0-9]*\.[0-9]+$ ]]; then
+                        LIMON_TIMER_THRESHOLD="${CONFIG_ARG#*=}"
+                        config_ok=1
+                    else
+                        echo "limon: timer_threshold must be a non-negative number of seconds (e.g. 2 or 0.5)" >&2
+                    fi
+                    ;;
                 git=*)
                     case "${CONFIG_ARG#*=}" in
                         full|lite|verbose|off) LIMON_GIT_MODE="${CONFIG_ARG#*=}"; config_ok=1 ;;
@@ -1898,9 +2004,10 @@ case "$SUBCOMMAND" in
             if [[ "$config_ok" -eq 1 ]]; then
                 mapfile -t _limon_flags < <(_limon_conf_flags)
                 _limon_write_config "$saved_theme" "${_limon_flags[@]}"
-                export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
-                       LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
-                       LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK LIMON_METRICS
+                # These stay shell variables rather than environment variables: the prompt
+                # renderer runs in this shell via PROMPT_COMMAND, and subshells inherit
+                # shell variables anyway, so exporting them only pollutes the environment
+                # of every child process.
                 if _limon_is_active; then
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \

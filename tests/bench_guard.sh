@@ -59,14 +59,14 @@ mean_us="$(
     LAST_EXIT_CODE=0
 
     # Warm any first-call caches so the measurement reflects steady state.
-    main default >/dev/null 2>&1
+    _limon_main default >/dev/null 2>&1
 
     t0="${EPOCHREALTIME/./}"
     for (( i = 0; i < ITERS; i++ )); do
         # Clear the 1s git cache so each iteration does the real work a user
         # pays for when moving between directories.
         unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC
-        main default
+        _limon_main default
     done
     t1="${EPOCHREALTIME/./}"
 

@@ -4,7 +4,9 @@
 
 Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? Hate having to install special "patched" Nerd Fonts just to see a Git branch in your prompt? Limon is built differently. It uses built-in Bash features to deliver a beautiful, informative, and **zero-delay** custom bash prompt experience — perfect for customizing your `.bashrc` / `bashrc` prompt on any system.
 
-**Works on:** Linux · macOS · WSL (Windows Subsystem for Linux) · Git Bash on Windows. **Requires:** Bash (Git optional, for the git branch indicator).
+**Works on:** Linux · macOS · WSL (Windows Subsystem for Linux) · Git Bash on Windows. **Requires:** Bash 4.0 or newer (Git optional, for the git branch indicator).
+
+> **macOS note:** Apple still ships Bash 3.2 as `/bin/bash`. Install a current one with `brew install bash` and use that shell — Limon checks the version at startup and tells you if it's too old rather than failing cryptically.
 
 ![Limon bash prompt showing git branch, 256-color theme, and command execution timer in a Linux terminal](https://raw.github.com/FaridRasidov/limon/master/example.png)
 
@@ -15,7 +17,7 @@ Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? H
 * ⚡ **Blazing Fast:** Written purely in Bash. No Python interpreters or heavy background processes slowing down your Enter key — a truly lightweight, fast terminal prompt.
 * 🔤 **No Patched Fonts Required:** Uses standard, universal Unicode symbols. It looks perfect out-of-the-box on any OS or font.
 * 🎨 **256-Color Modular Themes:** Choose from 11 built-in themes (Limon, Dracula, Nord, Neon, and more) or easily create your own with the built-in color picker.
-* ⏱️ **Smart Execution Timer:** Automatically displays how long a command took to run (only appears if the command takes longer than 2 seconds).
+* ⏱️ **Smart Execution Timer:** Automatically displays how long a command took to run, with sub-second precision (`1.4s`, `2m 05s`, `1h 02m 05s`). Only appears past a threshold you set — 2 seconds by default, and `limon config timer_threshold=0.5` accepts fractions.
 * 🌿 **Git Branch in Prompt:** See branch, staged/unstaged/untracked counts (`+N ~N ?N` in verbose mode), merge/rebase state, stash count (`≡N`), detached HEAD warning, and ahead/behind `(↑/↓)`.
 * 🔒 **Context-Aware Directories:** Directories you don't have write access to are marked with a `🔒` and colored gray.
   * Optional root warning is available with `limon config show_root=1`.
@@ -132,7 +134,8 @@ limon config git=verbose # Detailed +N staged, ~N modified, ?N untracked
 limon config show_exit=1 # Show exit code on failure (e.g. x127 $)
 limon config exit_hints=1 # Add hints like x130(SIGINT) when show_exit=1
 limon config clock=1    # Show HH:MM before the command timer (off by default)
-limon config timer_threshold=3
+limon config timer_threshold=3    # Only show the timer past 3 seconds
+limon config timer_threshold=0.5  # Fractions are allowed
 limon config show_ssh=1 # Show an [ssh] tag on remote sessions (off by default)
 limon config ascii=1    # Use ASCII symbols (# > ^ v) for dumb terminals
 limon config max_path=40 # Truncate long paths (e.g. ~/…/project/src)

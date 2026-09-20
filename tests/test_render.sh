@@ -30,7 +30,7 @@ reset_caches() {
 render() {
     reset_caches
     LAST_EXIT_CODE="${LAST_EXIT_CODE:-0}"
-    main "$1"
+    _limon_main "$1"
     printf '%s' "$PS1"
 }
 
