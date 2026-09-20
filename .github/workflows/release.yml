@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build a release for (e.g. v1.1.0)"
+        description: "Version tag to release, e.g. v1.1.0 (created if it does not exist yet)"
         required: true
 
 permissions:
@@ -17,12 +17,13 @@ jobs:
     name: Build and publish
     runs-on: ubuntu-latest
     steps:
+      # Checks out github.ref, which is the tag itself on a tag push and the
+      # selected branch on a manual run. Do NOT pin this to the input tag: on a
+      # manual run that tag usually does not exist yet, and creating it is the
+      # job of the publish step below.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # On workflow_dispatch the default ref is the branch, not the tag, so
-          # build from whatever ref was actually asked for.
-          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Resolve version from the tag
         id: version
@@ -160,7 +161,17 @@ jobs:
           )
           [[ "$PRERELEASE" == "true" ]] && args+=(--prerelease)
 
+          # --target points the tag at the commit this run built and tested.
+          # When the tag already exists (a tag push, or a re-run) gh uses it and
+          # ignores --target; when it does not, gh creates it here — so a manual
+          # run is a complete one-click release, and a tag is only ever created
+          # after the guard, the lint, the tests and the install check pass.
           gh release create "${args[@]}" \
+            --target "$GITHUB_SHA" \
             "dist/limon-${VERSION}.tar.gz" \
             "dist/limon-${VERSION}.zip" \
             dist/SHA256SUMS
+
+          echo "Released $TAG at $GITHUB_SHA"
+          gh release view "$TAG" --json tagName,isPrerelease,assets \
+            --jq '"tag=\(.tagName) prerelease=\(.isPrerelease) assets=\([.assets[].name] | join(", "))"' 

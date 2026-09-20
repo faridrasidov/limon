@@ -127,8 +127,27 @@ it "the release workflow publishes with the bundled gh CLI"
 # publishing.
 assert_contains "$(cat "$WORKFLOW")" "gh release create"
 
-it "the release workflow checks out the ref being released"
-assert_contains "$(cat "$WORKFLOW")" 'ref: ${{ github.event.inputs.tag || github.ref }}'
+it "the release workflow does not pin checkout to the input tag"
+# A manual run names a tag that usually does not exist yet, so checking it out
+# fails before anything can create it. github.ref is already the tag on a tag
+# push and the selected branch on a manual run, which is what we want in both
+# cases.
+assert_not_contains "$(cat "$WORKFLOW")" 'ref: ${{ github.event.inputs.tag'
+
+it "the release workflow creates the tag at the commit it built"
+assert_contains "$(cat "$WORKFLOW")" -- '--target "$GITHUB_SHA"'
+
+it "the tag is only created after the checks have run"
+# The publish step is the last one, so a failing guard, lint, test or install
+# check means no tag is ever created.
+wf="$(cat "$WORKFLOW")"
+publish_at="$(grep -n 'Publish the release' "$WORKFLOW" | cut -d: -f1)"
+tests_at="$(grep -n 'bash tests/run.sh' "$WORKFLOW" | head -1 | cut -d: -f1)"
+if [[ -n "$publish_at" && -n "$tests_at" ]] && (( publish_at > tests_at )); then
+    _limon_t_ok
+else
+    _limon_t_not_ok "publish (line ${publish_at:-?}) must come after tests (line ${tests_at:-?})"
+fi
 
 it "the release workflow verifies the archive installs before publishing"
 assert_contains "$(cat "$WORKFLOW")" "Verify the archive installs"
