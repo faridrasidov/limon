@@ -392,6 +392,34 @@ To temporarily disable it, run `limon off` to instantly restore your system's de
 
 ---
 
+## 🧪 Development & Testing
+
+Limon ships a dependency-free test suite written in plain Bash — no `bats`, no package manager, nothing to install.
+
+```shell
+bash tests/run.sh              # run everything
+bash tests/run.sh git          # run only files matching "git"
+bash tests/bench_guard.sh      # check prompt render time against a ceiling
+```
+
+Each test file runs in its own Bash process with an isolated `HOME` and `XDG_CONFIG_HOME`, so your real configuration and themes are never touched.
+
+Linting uses [ShellCheck](https://www.shellcheck.net/):
+
+```shell
+shellcheck -S warning limon.sh install.sh hint-limon.sh tests/*.sh
+```
+
+Both run automatically in CI on every push and pull request, across Bash 4.4, 5.0, and 5.2.
+
+To load Limon's functions without installing the prompt (useful when writing tests):
+
+```shell
+LIMON_SOURCE_ONLY=1 source ./limon.sh
+```
+
+---
+
 ## 🏷️ GitHub Topics
 
 To help others discover this project, the repository uses topics such as:

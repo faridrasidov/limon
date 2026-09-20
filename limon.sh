@@ -22,20 +22,26 @@ if [[ "${DEFAULT_PROMPT_COMMAND:-}" == *"not found"* ]] || \
     DEFAULT_PROMPT_COMMAND=""
 fi
 
-if [ -z "${DEFAULT_PS1}" ]; then
-    DEFAULT_PS1="${PS1}"
+if [ -z "${DEFAULT_PS1:-}" ]; then
+    DEFAULT_PS1="${PS1:-}"
     export DEFAULT_PS1
 fi
 
-if [[ -z "${PROMPT_COMMAND}" ]]; then
+if [[ -z "${PROMPT_COMMAND:-}" ]]; then
     DEFAULT_PROMPT_COMMAND=""
 else
-    if [[ "$PROMPT_COMMAND" != *"limon_runner"* ]]; then
+    if [[ "${PROMPT_COMMAND}" != *"limon_runner"* ]]; then
         DEFAULT_PROMPT_COMMAND="${PROMPT_COMMAND}"
     fi
 fi
 export DEFAULT_PROMPT_COMMAND
 
+# Best-effort capture of a DEBUG trap the user had before Limon.
+#
+# Note: bash does not expose the caller's DEBUG trap to a sourced script, so in
+# normal use (`source limon.sh on`) this is always empty and `limon off` cannot
+# restore a pre-existing trap — it disarms the trap instead. Kept so an inherited
+# DEFAULT_DEBUG_TRAP from a parent shell is still honored. See the lifecycle test.
 if [[ -z "${DEFAULT_DEBUG_TRAP+x}" ]]; then
     DEFAULT_DEBUG_TRAP="$(trap -p DEBUG 2>/dev/null || true)"
     export DEFAULT_DEBUG_TRAP
@@ -44,7 +50,7 @@ fi
 # --- 2. Path & Config Setup ---
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-if [[ -n "$XDG_CONFIG_HOME" ]]; then
+if [[ -n "${XDG_CONFIG_HOME:-}" ]]; then
     LIMON_CONF_DIR="$XDG_CONFIG_HOME/limon"
 else
     LIMON_CONF_DIR="$HOME/.config/limon"
@@ -212,6 +218,9 @@ _limon_is_active() {
 }
 
 _limon_preexec() {
+    # The DEBUG trap can outlive `limon off` (bash will not let a sourced script
+    # clear it), so bail out when Limon is not driving the prompt.
+    _limon_is_active || return 0
     [[ "${__LIMON_IN_PROMPT:-0}" == "1" ]] && return 0
     [[ "${BASH_COMMAND:-}" == "limon_runner"* ]] && return 0
     [[ "${BASH_COMMAND:-}" == "__LIMON_IN_PROMPT="* ]] && return 0
@@ -621,32 +630,51 @@ _limon_display_path() {
     local max="$1"
     local path="$PWD"
 
+    # The "~" here is a literal character for display, not a path to expand.
+    # shellcheck disable=SC2088
     if [[ -n "$HOME" ]]; then
         if [[ "$path" == "$HOME" ]]; then
             path="~"
         elif [[ "$path" == "$HOME/"* ]]; then
-            path="~/${path#$HOME/}"
+            path="~/${path#"$HOME"/}"
         fi
     fi
 
-    if [[ "$max" =~ ^[0-9]+$ && "$max" -gt 0 && ${#path} -gt "$max" ]]; then
-        local tail="${path##*/}"
-        [[ -z "$tail" ]] && tail="/"
-        if [[ "$path" == ~* ]]; then
-            path="~/…/${tail}"
-        elif [[ "$path" == /* ]]; then
-            path="/…/${tail}"
-        else
-            path="…/${tail}"
-        fi
-        while [[ ${#path} -gt "$max" && ${#tail} -gt 1 ]]; do
-            tail="${tail#*/}"
-            [[ "$path" == ~* ]] && path="~/…/${tail}" || path="/…/${tail}"
-        done
-        [[ ${#path} -gt "$max" ]] && path="…${tail: -$((max - 1))}"
+    if [[ ! "$max" =~ ^[0-9]+$ ]] || (( max <= 0 )) || (( ${#path} <= max )); then
+        echo "$path"
+        return
     fi
 
-    echo "$path"
+    # Split off the root marker so it survives truncation, then drop leading
+    # components one at a time until the result fits. 'rest' always contains a
+    # '/' at the top of the loop and strictly shrinks, so this always terminates.
+    local prefix="" rest="$path"
+    # shellcheck disable=SC2088  # literal "~" for display, not expansion
+    if [[ "$path" == "~/"* ]]; then
+        prefix="~/"; rest="${path#\~/}"
+    elif [[ "$path" == /* ]]; then
+        prefix="/"; rest="${path#/}"
+    fi
+
+    local candidate
+    while [[ "$rest" == */* ]]; do
+        rest="${rest#*/}"
+        candidate="${prefix}…/${rest}"
+        if (( ${#candidate} <= max )); then
+            echo "$candidate"
+            return
+        fi
+    done
+
+    # A single component that still overflows: keep its rightmost characters.
+    # Guard the offset — "${rest: -N}" with N greater than the length yields "".
+    if (( max <= 1 )); then
+        echo "${rest: -1}"
+    elif (( ${#rest} > max - 1 )); then
+        echo "…${rest: -$((max - 1))}"
+    else
+        echo "…${rest}"
+    fi
 }
 
 # --- Metrics helpers ---
@@ -827,6 +855,7 @@ _limon_load_hints() {
         return 0
     fi
     local hint="$SCRIPT_DIR/hint-limon.sh"
+    # shellcheck source=hint-limon.sh
     [[ -f "$hint" ]] && source "$hint"
 }
 
@@ -1030,14 +1059,13 @@ _limon_do_preview() {
 }
 
 # Restore the current shell's prompt and forget Limon state (used by off/uninstall).
+# Restores everything except the DEBUG trap. Bash scopes DEBUG trap changes made
+# inside a function to that function and restores the previous trap on return, so
+# `trap - DEBUG` here would silently do nothing — the caller must reset it at the
+# top level. See the `off` case arm.
 _limon_restore_session() {
-    export PS1="$DEFAULT_PS1"
+    export PS1="${DEFAULT_PS1:-}"
     PROMPT_COMMAND="${DEFAULT_PROMPT_COMMAND:-}"
-    if [[ -n "${DEFAULT_DEBUG_TRAP:-}" ]]; then
-        eval "$DEFAULT_DEBUG_TRAP"
-    else
-        trap - DEBUG 2>/dev/null || true
-    fi
     unset timer LAST_EXIT_CODE 2>/dev/null || true
     unset __LIMON_CMD_START __LIMON_CMD_ELAPSED __LIMON_CMD_ACTIVE __LIMON_IN_PROMPT \
           __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
@@ -1062,6 +1090,10 @@ _limon_do_uninstall() {
 }
 
 # --- 3. Subcommand & Config Loading ---
+# Skipped entirely under LIMON_SOURCE_ONLY (see the test hook before section 7), so
+# sourcing the script for its functions never parses a subcommand or writes config.
+if [[ -z "${LIMON_SOURCE_ONLY:-}" ]]; then
+
 SUBCOMMAND="${1:-}"
 shift || true
 
@@ -1086,6 +1118,8 @@ fi
 export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
        LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
        LIMON_SHOW_SUDO LIMON_K8S LIMON_CLOUD LIMON_SHOW_EXIT LIMON_EXIT_HINTS LIMON_SHOW_CLOCK LIMON_METRICS
+
+fi  # end LIMON_SOURCE_ONLY guard over sections 3-4
 
 # --- 5. Git Info (single call + short cache) ---
 _limon_git_op_state() {
@@ -1235,7 +1269,7 @@ _limon_git_info() {
 
 # --- 6. Main Prompt Function ---
 main() {
-    local last_exit=$LAST_EXIT_CODE
+    local last_exit="${LAST_EXIT_CODE:-0}"
     local theme_name="${1:-default}"
 
     local col_ok='\[\e[38;5;44m\]'
@@ -1253,6 +1287,8 @@ main() {
     theme_file="$(_limon_resolve_theme_file "$theme_name" 2>/dev/null || true)"
     if [[ -n "$theme_file" ]]; then
         _limon_validate_theme_file "$theme_file" || true
+        # Theme files are user data resolved at runtime; validated just above.
+        # shellcheck disable=SC1090
         source "$theme_file"
     fi
 
@@ -1300,9 +1336,9 @@ main() {
     fi
 
     local env_parts=()
-    [[ -n "$VIRTUAL_ENV" ]] && env_parts+=("(venv)")
-    [[ -n "$CONDA_DEFAULT_ENV" ]] && env_parts+=("(conda:$CONDA_DEFAULT_ENV)")
-    [[ -n "$DOCKER_MACHINE_NAME" ]] && env_parts+=("(dkr:$DOCKER_MACHINE_NAME)")
+    [[ -n "${VIRTUAL_ENV:-}" ]] && env_parts+=("(venv)")
+    [[ -n "${CONDA_DEFAULT_ENV:-}" ]] && env_parts+=("(conda:$CONDA_DEFAULT_ENV)")
+    [[ -n "${DOCKER_MACHINE_NAME:-}" ]] && env_parts+=("(dkr:$DOCKER_MACHINE_NAME)")
     local venv_str=""
     if [[ ${#env_parts[@]} -gt 0 ]]; then
         local part
@@ -1412,6 +1448,12 @@ export -f limon_runner
 export -f _limon_preexec
 export -f _limon_clock_us
 
+# Test hook: with LIMON_SOURCE_ONLY set, every function above is now defined but no
+# subcommand is dispatched and the prompt is never installed. tests/ relies on this.
+if [[ -n "${LIMON_SOURCE_ONLY:-}" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 # Only 'limon on' changes the live theme. Other subcommands (status, config,
 # upgrade, etc.) must preserve the currently active theme so their argument
 # (e.g. a channel name or config key) doesn't leak into the prompt renderer.
@@ -1440,6 +1482,16 @@ case "$SUBCOMMAND" in
         ;;
     off)
         _limon_restore_session
+        # Must happen here, not inside _limon_restore_session: bash localizes
+        # DEBUG trap changes to function and `source` contexts and restores the
+        # previous trap on return. Setting a trap propagates out; *clearing* one
+        # with `trap - DEBUG` does not, so disarming it with an empty action is
+        # the only thing that actually takes effect in the user's shell.
+        if [[ -n "${DEFAULT_DEBUG_TRAP:-}" ]]; then
+            eval "$DEFAULT_DEBUG_TRAP"
+        else
+            trap '' DEBUG 2>/dev/null || true
+        fi
         ;;
     reload)
         if ! _limon_is_active; then
