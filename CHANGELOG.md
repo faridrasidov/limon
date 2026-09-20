@@ -9,6 +9,53 @@ The format follows a simple, release-oriented structure:
 - `Fixed` for bug fixes.
 - `Docs` for documentation-only changes.
 
+## 1.2.0 - 2026-09-20
+
+### Upgrade notes
+
+- Bash 4.4 or newer is now required. Limon's native timer uses Bash 4.4's
+  `PS0` support so it no longer needs a global `DEBUG` trap.
+- Release archives are about 2.3 MB larger because they bundle the
+  architecture-independent ble.sh runtime. No compiler, platform-specific
+  binary, or runtime download is required.
+
+### Added
+
+- Fish/Zsh-style inline ghost autosuggestions for command history, commands,
+  paths, and programmable completions. Right Arrow or End accepts the full
+  suggestion; Ctrl+Right accepts one word; Tab remains normal completion.
+- Autosuggestions are enabled by default and can be controlled with
+  `autosuggest=0|1`, `autosuggest_delay=0..2000`, and
+  `autosuggest_color=auto|0..255`.
+- Limon reuses an already-loaded ble.sh session or loads its bundled pinned
+  copy. `limon status` and `limon health` report the editor, hook provider, and
+  bash-completion state.
+- PTY coverage for rendering and accepting a real history suggestion, plus
+  lifecycle tests for scalar and array `PROMPT_COMMAND` values.
+
+### Changed
+
+- The command timer and prompt renderer use ble.sh's public `PREEXEC` and
+  `PRECMD` hooks when its editor is active. The native fallback uses `PS0` and
+  a composable `PROMPT_COMMAND` entry.
+- Bash 5.1+ preserves `PROMPT_COMMAND` as an array. Bash 4.4-5.0 uses an exact,
+  removable scalar prefix and does not restore a stale startup snapshot.
+- The bundled editor enables only ghost suggestions: syntax highlighting,
+  completion menus, EOF markers, and other visual ble.sh defaults are disabled.
+- `limon off` disables every Limon-owned editor feature and hook. A bundled
+  ble.sh runtime already sourced into the current Bash process stays resident
+  but inert until that shell exits; ble.sh does not support a silent full
+  unload back into Readline.
+- The installer no longer forces `TERM=xterm-256color` and now safely quotes
+  installed paths written to `.bashrc`.
+
+### Fixed
+
+- `limon off` removes only Limon-owned hooks and restores an existing ble.sh
+  configuration without detaching a user-owned editor.
+- Existing `DEBUG` traps are no longer replaced by Limon, fixing compatibility
+  with debuggers and other shell frameworks.
+
 ## 1.1.0 - 2026-09-20
 
 ### Upgrade notes

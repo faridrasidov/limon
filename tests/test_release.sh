@@ -42,13 +42,24 @@ assert_contains "$(bash "$LIMON_SH" version 2>&1)" "$VERSION"
 
 # --- the files a release ships -----------------------------------------------
 
-for f in limon.sh hint-limon.sh install.sh get-limon.sh README.md CHANGELOG.md LICENSE; do
+for f in limon.sh hint-limon.sh install.sh get-limon.sh README.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md; do
     it "release payload includes $f"
     assert_ok test -f "$LIMON_REPO_ROOT/$f"
 done
 
 it "release payload includes the themes"
 assert_ok test -d "$LIMON_REPO_ROOT/themes"
+
+it "release payload includes the pinned ble.sh runtime"
+assert_ok test -f "$LIMON_REPO_ROOT/vendor/blesh/ble.sh"
+
+it "ble.sh vendoring metadata pins a full commit and checksum"
+vendor_meta="$(cat "$LIMON_REPO_ROOT/vendor/blesh/UPSTREAM.md")"
+if [[ "$vendor_meta" =~ Commit:\ [0-9a-f]{40} ]] && [[ "$vendor_meta" =~ SHA-256:\ [0-9a-f]{64} ]]; then
+    _limon_t_ok
+else
+    _limon_t_not_ok "vendoring metadata must contain a 40-character commit and 64-character SHA-256"
+fi
 
 it "every theme file is non-empty"
 empty=""
@@ -151,6 +162,39 @@ fi
 
 it "the release workflow verifies the archive installs before publishing"
 assert_contains "$(cat "$WORKFLOW")" "Verify the archive installs"
+
+it "the release workflow packages the vendored editor"
+assert_contains "$(cat "$WORKFLOW")" 'cp -r vendor'
+
+it "the release workflow checks the rc line install.sh actually writes"
+# These two encode the same fact in two files. They drifted once already: the
+# workflow grepped for 'limon on' while install.sh had switched to
+# "source <dir>/limon.sh on", which would have failed the next release.
+rc_pattern="$(grep -oE "grep -qE '\^source [^']*'" "$WORKFLOW" | head -1)"
+if [[ -n "$rc_pattern" ]]; then
+    _limon_t_ok
+else
+    _limon_t_not_ok "release.yml must assert the startup line with an anchored pattern"
+fi
+
+it "the workflow's rc pattern matches a real install"
+# Build the rc file the way the release job does, then apply the workflow's own
+# assertions to it.
+sandbox="$(mktemp -d)"
+env HOME="$sandbox" XDG_DATA_HOME="$sandbox/.local/share" \
+    XDG_CONFIG_HOME="$sandbox/.config" \
+    bash "$LIMON_REPO_ROOT/install.sh" --user -y >/dev/null 2>&1
+if grep -q '^# >>> limon >>>' "$sandbox/.bashrc" &&
+   grep -qE '^source .*/limon\.sh on$' "$sandbox/.bashrc"; then
+    _limon_t_ok
+else
+    _limon_t_not_ok "release.yml's rc assertions do not match what install.sh writes" \
+                    "rc file: $(grep -c . "$sandbox/.bashrc" 2>/dev/null || echo 0) lines"
+fi
+rm -rf "$sandbox"
+
+it "the release workflow no longer greps the loose 'limon on' substring"
+assert_not_contains "$(cat "$WORKFLOW")" "grep -q 'limon on'"
 
 it "the release workflow runs the test suite"
 assert_contains "$(cat "$WORKFLOW")" "bash tests/run.sh"
