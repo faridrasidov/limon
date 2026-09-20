@@ -71,7 +71,7 @@ it "install wires up the limon alias"
 assert_contains "$(cat "$BASHRC")" "alias limon="
 
 it "install enables the prompt on startup"
-assert_contains "$(cat "$BASHRC")" "limon on"
+assert_contains "$(cat "$BASHRC")" "limon.sh on"
 
 it "install tells the user what to do next"
 assert_contains "$install_out" "source ~/.bashrc"
@@ -95,14 +95,24 @@ assert_eq "1" "$(count_in_bashrc '^alias limon=')"
 
 # --- the installed copy actually works ---------------------------------------
 
+# NOTE: the markers here must not be substrings of one another. "INACTIVE"
+# contains "ACTIVE", so asserting on those two made this check pass either way.
 it "a shell sourcing the generated .bashrc ends up with Limon active"
 out="$(env HOME="$SANDBOX" XDG_DATA_HOME="$SANDBOX/.local/share" \
     XDG_CONFIG_HOME="$SANDBOX/.config" TERM=xterm-256color \
     bash -c "source '$BASHRC' >/dev/null 2>&1; case \"\$PROMPT_COMMAND\" in
-        *limon_runner*) echo ACTIVE ;;
-        *) echo INACTIVE ;;
+        *limon_runner*) echo LIMON-ON ;;
+        *) echo LIMON-OFF ;;
     esac")"
-assert_contains "$out" "ACTIVE"
+assert_eq "LIMON-ON" "$out"
+
+it "the startup line does not depend on alias expansion"
+# Aliases are not expanded in non-interactive shells, so an rc block that
+# enables the prompt via the alias silently does nothing in those contexts.
+assert_contains "$(cat "$BASHRC")" "limon.sh on"
+
+it "the rc block still defines the limon alias for interactive use"
+assert_contains "$(cat "$BASHRC")" "alias limon="
 
 it "the installed copy reports the current version"
 out="$(env HOME="$SANDBOX" XDG_CONFIG_HOME="$SANDBOX/.config" \

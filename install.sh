@@ -215,7 +215,11 @@ do_install() {
         printf '%s\n' "export TERM=xterm-256color"
         printf 'alias limon="source %s/limon.sh"\n' "$TARGET_DIR"
         printf 'source %s/hint-limon.sh\n' "$TARGET_DIR"
-        printf '%s\n' "limon on"
+        # Enable the prompt by sourcing directly rather than through the alias:
+        # bash does not expand aliases in non-interactive shells, so "limon on"
+        # here fails in any context that reads this file without an interactive
+        # shell. The alias above is still what the user types day to day.
+        printf 'source %s/limon.sh on\n' "$TARGET_DIR"
         printf '%s\n' "$LIMON_END"
     } >> "$RC_FILE"
 
