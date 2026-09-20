@@ -12,12 +12,14 @@ export LIMON_TEST_DIR LIMON_REPO_ROOT
 
 _LIMON_T_PASS=0
 _LIMON_T_FAIL=0
+_LIMON_T_SKIP=0
 _LIMON_T_CURRENT="(none)"
 
 # --- Output -----------------------------------------------------------------
 
-_limon_t_red()   { printf '\033[31m%s\033[0m' "$1"; }
-_limon_t_green() { printf '\033[32m%s\033[0m' "$1"; }
+_limon_t_red()    { printf '\033[31m%s\033[0m' "$1"; }
+_limon_t_green()  { printf '\033[32m%s\033[0m' "$1"; }
+_limon_t_yellow() { printf '\033[33m%s\033[0m' "$1"; }
 
 # it <description> — names the assertions that follow.
 it() {
@@ -38,6 +40,16 @@ _limon_t_not_ok() {
     for line in "$@"; do
         printf '       %s\n' "$line"
     done
+}
+
+# skip <reason> — the case could not run here. Counted separately and never as
+# a pass: a dependency that is missing locally but present in CI must not read
+# as green, or the only test for a feature can stop running unnoticed.
+skip() {
+    _LIMON_T_SKIP=$((_LIMON_T_SKIP + 1))
+    printf '  %s %s\n' "$(_limon_t_yellow 'skip')" "$_LIMON_T_CURRENT"
+    [[ -n "${1:-}" ]] && printf '       %s\n' "$1"
+    return 0
 }
 
 # --- Assertions -------------------------------------------------------------
@@ -140,7 +152,12 @@ cleanup_temp_home() {
 
 # Called at the end of every test file; run.sh reads the exit status.
 finish() {
-    printf '  %d passed, %d failed\n' "$_LIMON_T_PASS" "$_LIMON_T_FAIL"
+    if [[ "$_LIMON_T_SKIP" -gt 0 ]]; then
+        printf '  %d passed, %d failed, %d skipped\n' \
+            "$_LIMON_T_PASS" "$_LIMON_T_FAIL" "$_LIMON_T_SKIP"
+    else
+        printf '  %d passed, %d failed\n' "$_LIMON_T_PASS" "$_LIMON_T_FAIL"
+    fi
     cleanup_temp_home
     [[ "$_LIMON_T_FAIL" -eq 0 ]]
 }

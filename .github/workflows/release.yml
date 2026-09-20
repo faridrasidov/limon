@@ -116,7 +116,13 @@ jobs:
             bash "$work/limon-${VERSION}/install.sh" --user -y
           test -f "$home/.local/share/limon/limon.sh"
           test -f "$home/.local/share/limon/vendor/blesh/ble.sh"
-          grep -q 'limon on' "$home/.bashrc"
+          # Match what install.sh actually writes. This used to grep for the
+          # loose substring 'limon on', which stopped matching when the startup
+          # line became "source <dir>/limon.sh on" — that string contains
+          # "limon.sh on", not "limon on", so the check would have failed the
+          # next release.
+          grep -q '^# >>> limon >>>' "$home/.bashrc"
+          grep -qE '^source .*/limon\.sh on$' "$home/.bashrc"
           echo "Archive installs cleanly."
 
       - name: Extract the changelog section for this version
