@@ -20,34 +20,53 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # On workflow_dispatch the default ref is the branch, not the tag, so
+          # build from whatever ref was actually asked for.
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Resolve version from the tag
         id: version
         run: |
+          set -euo pipefail
           tag="${{ github.event.inputs.tag || github.ref_name }}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          version="${tag#v}"
+
+          # A pre-release tag carries a suffix (v1.1.0-rc1). Artifacts use the
+          # full version, but LIMON_VERSION and the changelog only ever name the
+          # base version, so compare against that.
+          base="${version%%-*}"
+          prerelease=false
+          [[ "$version" == *-* ]] && prerelease=true
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "base=$base"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "tag=$tag version=$version base=$base prerelease=$prerelease"
 
       - name: Check the tag matches LIMON_VERSION and the changelog
         env:
           TAG: ${{ steps.version.outputs.tag }}
-          VERSION: ${{ steps.version.outputs.version }}
+          BASE: ${{ steps.version.outputs.base }}
         run: |
           set -euo pipefail
 
           declared="$(grep -m1 '^LIMON_VERSION=' limon.sh | cut -d'"' -f2)"
-          if [[ "$declared" != "$VERSION" ]]; then
-            echo "::error::Tag $TAG does not match LIMON_VERSION=$declared in limon.sh." >&2
+          if [[ "$declared" != "$BASE" ]]; then
+            echo "::error::Tag $TAG implies version $BASE, but limon.sh declares LIMON_VERSION=$declared." >&2
             echo "Bump LIMON_VERSION, or tag the right commit." >&2
             exit 1
           fi
 
-          if ! grep -qE "^## ${VERSION//./\\.} " CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no '## $VERSION' section." >&2
+          if ! grep -qE "^## ${BASE//./\\.} " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $BASE' section." >&2
             exit 1
           fi
 
-          echo "Version $VERSION checks out."
+          echo "Version $BASE checks out."
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
@@ -100,10 +119,11 @@ jobs:
       - name: Extract the changelog section for this version
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          BASE: ${{ steps.version.outputs.base }}
         run: |
           set -euo pipefail
           # Everything between this version's heading and the next one.
-          awk -v ver="## ${VERSION} " '
+          awk -v ver="## ${BASE} " '
             index($0, ver) == 1 { found = 1; next }
             found && /^## [0-9]+\.[0-9]+\.[0-9]+/ { exit }
             found { print }
@@ -126,12 +146,21 @@ jobs:
           cat release-notes.md
 
       - name: Publish the release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Limon ${{ steps.version.outputs.version }}
-          body_path: release-notes.md
-          files: |
-            dist/limon-${{ steps.version.outputs.version }}.tar.gz
-            dist/limon-${{ steps.version.outputs.version }}.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          args=(
+            "$TAG"
+            --title "Limon $VERSION"
+            --notes-file release-notes.md
+          )
+          [[ "$PRERELEASE" == "true" ]] && args+=(--prerelease)
+
+          gh release create "${args[@]}" \
+            "dist/limon-${VERSION}.tar.gz" \
+            "dist/limon-${VERSION}.zip" \
             dist/SHA256SUMS
