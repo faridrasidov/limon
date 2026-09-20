@@ -10,6 +10,14 @@ source "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/helpers.sh"
 use_temp_home
 load_limon
 
+# _limon_display_path returns through __LIMON_PATH rather than stdout, so that
+# the prompt can build it without forking a subshell on every render.
+dp() {
+    __LIMON_PATH=""
+    _limon_display_path "$1"
+    printf '%s' "$__LIMON_PATH"
+}
+
 mkdir -p "$HOME/projects/limon"
 DEEP="$HOME/a/very/deeply/nested/path/structure/here"
 mkdir -p "$DEEP"
@@ -18,22 +26,22 @@ mkdir -p "$DEEP"
 
 cd "$HOME" || exit 1
 it "collapses \$HOME itself to ~"
-assert_eq "~" "$(_limon_display_path 0)"
+assert_eq "~" "$(dp 0)"
 
 cd "$HOME/projects/limon" || exit 1
 it "collapses a path under \$HOME to ~/..."
-assert_eq "~/projects/limon" "$(_limon_display_path 0)"
+assert_eq "~/projects/limon" "$(dp 0)"
 
 cd /tmp || exit 1
 it "leaves a path outside \$HOME absolute"
-assert_eq "/tmp" "$(_limon_display_path 0)"
+assert_eq "/tmp" "$(dp 0)"
 
 cd "$HOME/projects/limon" || exit 1
 it "does not truncate when the path already fits"
-assert_eq "~/projects/limon" "$(_limon_display_path 40)"
+assert_eq "~/projects/limon" "$(dp 40)"
 
 it "treats a non-numeric max as no limit"
-assert_eq "~/projects/limon" "$(_limon_display_path "abc")"
+assert_eq "~/projects/limon" "$(dp abc)"
 
 # --- truncation invariants ---
 #
@@ -44,16 +52,16 @@ assert_eq "~/projects/limon" "$(_limon_display_path "abc")"
 cd "$DEEP" || exit 1
 
 it "truncation keeps the final component visible"
-assert_contains "$(_limon_display_path 15)" "here"
+assert_contains "$(dp 15)" "here"
 
 it "truncation marks elision with the ellipsis"
-assert_contains "$(_limon_display_path 15)" "…"
+assert_contains "$(dp 15)" "…"
 
 it "truncation drops interior components"
-assert_not_contains "$(_limon_display_path 15)" "deeply"
+assert_not_contains "$(dp 15)" "deeply"
 
 it "a generous limit leaves the path untouched"
-assert_eq "~/a/very/deeply/nested/path/structure/here" "$(_limon_display_path 100)"
+assert_eq "~/a/very/deeply/nested/path/structure/here" "$(dp 100)"
 
 # --- regression: these used to loop forever ---
 #
@@ -68,6 +76,7 @@ for max in 1 2 3 4 5 6 8 9 10 12; do
         export HOME='$HOME'
         cd '$DEEP' || exit 1
         _limon_display_path $max
+        printf '%s' \"\$__LIMON_PATH\"
     ")"
     rc=$?
     if [[ $rc -eq 124 ]]; then
@@ -82,6 +91,6 @@ it "never returns empty for a single overlong component"
 cd "$HOME" || exit 1
 mkdir -p "$HOME/averyveryverylongsingledirectorynamehere"
 cd "$HOME/averyveryverylongsingledirectorynamehere" || exit 1
-assert_ne "" "$(_limon_display_path 5)"
+assert_ne "" "$(dp 5)"
 
 finish

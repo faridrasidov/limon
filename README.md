@@ -157,8 +157,9 @@ Limon is built for speed, and you can measure it. Limon can report how long it t
 **Benchmark the prompt render time:**
 
 ```bash
-limon bench        # Average render time over 100 runs
-limon bench 500    # More iterations for a steadier average
+limon bench              # Average render time over 100 runs
+limon bench 500          # More iterations for a steadier average
+limon bench --breakdown  # Per-segment timings, to see where the time goes
 ```
 
 Example output:
@@ -183,6 +184,25 @@ limon config metrics=0   # Turn it back off (default)
 ```
 
 `limon health` also includes a quick render-time and memory line.
+
+**Where the time goes:**
+
+```
+$ limon bench --breakdown
+Limon prompt benchmark — per segment
+  theme: default, git mode: full, 200 iterations each
+
+  theme (cached)         0.068 ms
+  git info               0.065 ms
+  safety prefix          0.032 ms
+  path                   0.020 ms
+  prompt symbol          0.028 ms
+  host color             0.014 ms
+  symbols                0.014 ms
+
+  segments total         0.241 ms
+  whole render           0.363 ms
+```
 
 > **Notes:**
 > - Render time is **wall-clock** time spent building the prompt. Sub-millisecond precision needs **bash 5+** (uses `$EPOCHREALTIME`, no subprocess) or **GNU `date`**.

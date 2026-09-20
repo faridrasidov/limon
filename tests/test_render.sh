@@ -159,4 +159,28 @@ LIMON_ASCII=0
 it "renders for a theme that does not exist, falling back to defaults"
 assert_ne "" "$(render definitely-not-a-theme)"
 
+# --- background jobs ---
+#
+# The job count is gated behind `jobs -r %%` so the common no-jobs case avoids a
+# subshell. These pin both sides of that gate.
+
+it "shows no job counter when there are no background jobs"
+assert_not_contains "$(render default)" "[1]"
+
+it "shows the job counter when a background job is running"
+sleep 30 &
+job_pid=$!
+assert_contains "$(render default)" "[1] "
+
+it "counts multiple background jobs"
+sleep 30 &
+job_pid2=$!
+assert_contains "$(render default)" "[2] "
+
+kill "$job_pid" "$job_pid2" 2>/dev/null
+wait "$job_pid" "$job_pid2" 2>/dev/null
+
+it "drops the job counter once the jobs finish"
+assert_not_contains "$(render default)" "[1] "
+
 finish

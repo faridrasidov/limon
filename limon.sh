@@ -462,6 +462,11 @@ _limon_init_symbols() {
     fi
 }
 
+# Sets __LIMON_ASCII_OUT to the ASCII transliteration of "$1".
+#
+# Every helper on the render path returns through a global rather than stdout:
+# a command substitution forks a subshell, and the prompt is rebuilt on every
+# single command. See _limon_clock_us for the original instance of this pattern.
 _limon_ascii_text() {
     local s="$1"
     s="${s//↑/$__LIMON_SYM_UP}"
@@ -472,25 +477,30 @@ _limon_ascii_text() {
     s="${s//⚠/$__LIMON_SYM_WARN}"
     s="${s//≡/$__LIMON_SYM_STASH}"
     s="${s//✗/$__LIMON_SYM_FAIL}"
-    echo "$s"
+    __LIMON_ASCII_OUT="$s"
 }
 
 # --- Phase 8: Exit-code clarity ---
+# Sets __LIMON_EXIT_HINT to a short label for an exit code; returns 1 if there
+# is no useful label for it.
 _limon_exit_hint() {
     local code="$1"
+    __LIMON_EXIT_HINT=""
     case "$code" in
-        1) echo "error" ;;
-        2) echo "builtin" ;;
-        126) echo "not executable" ;;
-        127) echo "not found" ;;
-        130) echo "SIGINT" ;;
-        137) echo "SIGKILL" ;;
-        143) echo "SIGTERM" ;;
-        1[2-9][0-9]) echo "signal$((code - 128))" ;;
+        1) __LIMON_EXIT_HINT="error" ;;
+        2) __LIMON_EXIT_HINT="builtin" ;;
+        126) __LIMON_EXIT_HINT="not executable" ;;
+        127) __LIMON_EXIT_HINT="not found" ;;
+        130) __LIMON_EXIT_HINT="SIGINT" ;;
+        137) __LIMON_EXIT_HINT="SIGKILL" ;;
+        143) __LIMON_EXIT_HINT="SIGTERM" ;;
+        1[2-9][0-9]) __LIMON_EXIT_HINT="signal$((code - 128))" ;;
         *) return 1 ;;
     esac
 }
 
+# Sets __LIMON_SYMBOL to the trailing prompt symbol, including the exit-code
+# badge when show_exit is on.
 _limon_prompt_symbol() {
     local last_exit="$1"
     local col_ok="$2"
@@ -507,49 +517,61 @@ _limon_prompt_symbol() {
     if [[ "$last_exit" -ne 0 && "${LIMON_SHOW_EXIT:-0}" == "1" ]]; then
         local exit_label="${__LIMON_SYM_FAIL}${last_exit}"
         if [[ "${LIMON_EXIT_HINTS:-0}" == "1" ]]; then
-            local hint
-            hint="$(_limon_exit_hint "$last_exit" 2>/dev/null || true)"
-            [[ -n "$hint" ]] && exit_label+="(${hint})"
+            if _limon_exit_hint "$last_exit" 2>/dev/null && [[ -n "$__LIMON_EXIT_HINT" ]]; then
+                exit_label+="(${__LIMON_EXIT_HINT})"
+            fi
         fi
         if [[ -n "$theme_symbol_prefix" ]]; then
-            symbol_str="${symbol_str}${theme_symbol_prefix}${exit_label} ${prompt_char} ${c_reset}"
+            __LIMON_SYMBOL="${symbol_str}${theme_symbol_prefix}${exit_label} ${prompt_char} ${c_reset}"
         else
-            symbol_str="${symbol_str}${exit_label} ${prompt_char} ${c_reset}"
+            __LIMON_SYMBOL="${symbol_str}${exit_label} ${prompt_char} ${c_reset}"
         fi
-        echo -n "$symbol_str"
         return
     fi
 
     [[ -n "$theme_symbol_prefix" ]] && symbol_str="${symbol_str}${theme_symbol_prefix}"
-    symbol_str="${symbol_str}${prompt_char} ${c_reset}"
-    echo -n "$symbol_str"
+    __LIMON_SYMBOL="${symbol_str}${prompt_char} ${c_reset}"
 }
 
 # --- Phase 6: Identity & safety helpers ---
+# Sets __LIMON_HOSTCOL to a 256-color index for the host segment; returns 1 when
+# host coloring is off, leaving the caller on the theme's own host color.
+#
+# The hash is cached on the hostname: it never changes within a shell, and the
+# old implementation forked a subshell for every single character of it.
 _limon_host_color_code() {
     local mode="${LIMON_HOST_COLOR:-off}"
-    local host="${HOSTNAME:-$(hostname 2>/dev/null)}"
 
     if [[ "$mode" == "off" || "$mode" == "0" ]]; then
         return 1
     fi
 
-    if [[ "$mode" == "auto" ]]; then
-        local hash=0 i c
-        for ((i = 0; i < ${#host}; i++)); do
-            c=$(printf '%d' "'${host:$i:1}")
-            hash=$(( (hash * 31 + c) % 216 ))
-        done
-        echo $(( 32 + hash % 200 ))
-        return 0
-    fi
-
     if [[ "$mode" =~ ^[0-9]+$ ]]; then
-        echo "$mode"
+        __LIMON_HOSTCOL="$mode"
         return 0
     fi
 
-    return 1
+    [[ "$mode" == "auto" ]] || return 1
+
+    local host="${HOSTNAME:-}"
+    if [[ -z "$host" ]]; then
+        host="$(hostname 2>/dev/null)"
+        HOSTNAME="$host"
+    fi
+
+    if [[ "${__LIMON_HOSTCOL_FOR:-}" == "$host" && -n "${__LIMON_HOSTCOL:-}" ]]; then
+        return 0
+    fi
+
+    local hash=0 i c
+    for (( i = 0; i < ${#host}; i++ )); do
+        printf -v c '%d' "'${host:$i:1}"
+        hash=$(( (hash * 31 + c) % 216 ))
+    done
+
+    __LIMON_HOSTCOL=$(( 32 + hash % 200 ))
+    __LIMON_HOSTCOL_FOR="$host"
+    return 0
 }
 
 _limon_has_sudo_ticket() {
@@ -562,16 +584,19 @@ _limon_has_sudo_ticket() {
     return 1
 }
 
+# Sets __LIMON_K8S_LABEL to the kubectl context badge; returns 1 when there is
+# nothing to show.
 _limon_k8s_label() {
+    __LIMON_K8S_LABEL=""
     [[ "${LIMON_K8S:-0}" != "1" ]] && return 1
 
     if [[ -n "${KUBE_PS1_CONTEXT:-}" ]]; then
-        echo "(k8s:$KUBE_PS1_CONTEXT)"
+        __LIMON_K8S_LABEL="(k8s:$KUBE_PS1_CONTEXT)"
         return 0
     fi
 
     if [[ $((SECONDS - ${__LIMON_K8S_CACHE_SEC:-0})) -lt 2 && -n "${__LIMON_K8S_CACHE_CTX:-}" ]]; then
-        echo "(k8s:$__LIMON_K8S_CACHE_CTX)"
+        __LIMON_K8S_LABEL="(k8s:$__LIMON_K8S_CACHE_CTX)"
         return 0
     fi
 
@@ -583,9 +608,11 @@ _limon_k8s_label() {
     ctx="$(kubectl config current-context 2>/dev/null)" || return 1
     __LIMON_K8S_CACHE_CTX="$ctx"
     __LIMON_K8S_CACHE_SEC=$SECONDS
-    echo "(k8s:$ctx)"
+    __LIMON_K8S_LABEL="(k8s:$ctx)"
 }
 
+# Sets __LIMON_SAFETY to the leading banner segment (root warning, environment
+# label, sudo ticket, cloud profile, kubectl context).
 _limon_safety_prefix() {
     local c_reset="$1"
     local col_err="$2"
@@ -617,15 +644,15 @@ _limon_safety_prefix() {
         prefix+="${c_reset}(aws:$AWS_PROFILE) "
     fi
 
-    local k8s_label
-    k8s_label="$(_limon_k8s_label 2>/dev/null || true)"
-    if [[ -n "$k8s_label" ]]; then
-        prefix+="${c_reset}${k8s_label} "
+    if _limon_k8s_label 2>/dev/null && [[ -n "$__LIMON_K8S_LABEL" ]]; then
+        prefix+="${c_reset}${__LIMON_K8S_LABEL} "
     fi
 
-    echo -n "$prefix"
+    __LIMON_SAFETY="$prefix"
 }
 
+# Sets __LIMON_PATH to the directory segment, collapsing $HOME to ~ and
+# truncating to at most "$1" characters (0 disables truncation).
 _limon_display_path() {
     local max="$1"
     local path="$PWD"
@@ -641,7 +668,7 @@ _limon_display_path() {
     fi
 
     if [[ ! "$max" =~ ^[0-9]+$ ]] || (( max <= 0 )) || (( ${#path} <= max )); then
-        echo "$path"
+        __LIMON_PATH="$path"
         return
     fi
 
@@ -661,7 +688,7 @@ _limon_display_path() {
         rest="${rest#*/}"
         candidate="${prefix}…/${rest}"
         if (( ${#candidate} <= max )); then
-            echo "$candidate"
+            __LIMON_PATH="$candidate"
             return
         fi
     done
@@ -669,11 +696,11 @@ _limon_display_path() {
     # A single component that still overflows: keep its rightmost characters.
     # Guard the offset — "${rest: -N}" with N greater than the length yields "".
     if (( max <= 1 )); then
-        echo "${rest: -1}"
+        __LIMON_PATH="${rest: -1}"
     elif (( ${#rest} > max - 1 )); then
-        echo "…${rest: -$((max - 1))}"
+        __LIMON_PATH="…${rest: -$((max - 1))}"
     else
-        echo "…${rest}"
+        __LIMON_PATH="…${rest}"
     fi
 }
 
@@ -722,7 +749,74 @@ _limon_fmt_ms() {
 }
 
 # Benchmark prompt rendering: limon bench [iterations]
+# Times one segment "$iters" times and prints its share of a render.
+# Sets __LIMON_SEG_US so the caller can tally what the parts add up to.
+_limon_bench_segment() {
+    local label="$1" iters="$2"; shift 2
+    local t0 t1 i
+    _limon_clock_us; t0="$__LIMON_T"
+    for (( i = 0; i < iters; i++ )); do
+        "$@" >/dev/null 2>&1
+    done
+    _limon_clock_us; t1="$__LIMON_T"
+    __LIMON_SEG_US=$(( (t1 - t0) / iters ))
+    (( __LIMON_SEG_US < 0 )) && __LIMON_SEG_US=0
+    printf '  %-22s %s\n' "$label" "$(_limon_fmt_ms "$__LIMON_SEG_US")"
+}
+
+# Per-segment timings, so a regression can be attributed rather than guessed at.
+_limon_do_bench_breakdown() {
+    local iters="${1:-100}"
+    local theme="${LIMON_THEME_ARG:-${saved_theme:-default}}"
+
+    _limon_clock_us
+    if [[ -z "$__LIMON_T" ]]; then
+        echo "limon bench: no high-resolution timer (needs bash 5+ or GNU date)." >&2
+        return 1
+    fi
+
+    echo "Limon prompt benchmark — per segment"
+    printf '  theme: %s, git mode: %s, %d iterations each\n\n' \
+        "$theme" "${LIMON_GIT_MODE:-full}" "$iters"
+
+    local parts=0
+
+    _limon_bench_segment "theme (cached)" "$iters" _limon_load_theme "$theme"
+    parts=$(( parts + __LIMON_SEG_US ))
+    _limon_bench_segment "git info" "$iters" _limon_git_info
+    parts=$(( parts + __LIMON_SEG_US ))
+    _limon_bench_segment "safety prefix" "$iters" _limon_safety_prefix "" ""
+    parts=$(( parts + __LIMON_SEG_US ))
+    _limon_bench_segment "path" "$iters" _limon_display_path "${LIMON_MAX_PATH:-40}"
+    parts=$(( parts + __LIMON_SEG_US ))
+    _limon_bench_segment "prompt symbol" "$iters" _limon_prompt_symbol 0 "" "" "" ""
+    parts=$(( parts + __LIMON_SEG_US ))
+    _limon_bench_segment "host color" "$iters" _limon_host_color_code
+    parts=$(( parts + __LIMON_SEG_US ))
+    _limon_bench_segment "symbols" "$iters" _limon_init_symbols
+    parts=$(( parts + __LIMON_SEG_US ))
+
+    local saved_ps1="$PS1" t0 t1 i
+    _limon_clock_us; t0="$__LIMON_T"
+    for (( i = 0; i < iters; i++ )); do
+        main "$theme" >/dev/null 2>&1
+    done
+    _limon_clock_us; t1="$__LIMON_T"
+    PS1="$saved_ps1"
+
+    local whole_us=$(( (t1 - t0) / iters ))
+    (( whole_us < 0 )) && whole_us=0
+
+    printf '\n  %-22s %s\n' "segments total" "$(_limon_fmt_ms "$parts")"
+    printf '  %-22s %s\n' "whole render" "$(_limon_fmt_ms "$whole_us")"
+}
+
 _limon_do_bench() {
+    if [[ "${1:-}" == "--breakdown" || "${1:-}" == "-b" ]]; then
+        _limon_do_bench_breakdown "${2:-100}"
+        return
+    fi
+
     local iters="${1:-100}"
     [[ "$iters" =~ ^[0-9]+$ ]] || iters=100
     (( iters < 1 )) && iters=1
@@ -1018,6 +1112,7 @@ _limon_do_edit() {
         unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
               __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
               __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
+        _limon_invalidate_theme_cache
         LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
         limon_runner
     fi
@@ -1122,30 +1217,69 @@ export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON
 fi  # end LIMON_SOURCE_ONLY guard over sections 3-4
 
 # --- 5. Git Info (single call + short cache) ---
+# Sets __LIMON_GIT_DIR to this repo's git directory, cached per working
+# directory. One rev-parse then serves both the in-progress-operation check and
+# the stash count instead of one fork each.
+_limon_git_resolve_dir() {
+    if [[ "${__LIMON_GIT_DIR_PWD:-}" == "$PWD" ]]; then
+        [[ -n "${__LIMON_GIT_DIR:-}" ]] && return 0 || return 1
+    fi
+    __LIMON_GIT_DIR_PWD="$PWD"
+    __LIMON_GIT_DIR="$(git --no-optional-locks rev-parse --git-dir 2>/dev/null)" || {
+        __LIMON_GIT_DIR=""
+        return 1
+    }
+    [[ -n "$__LIMON_GIT_DIR" ]] || return 1
+}
+
+# Sets __LIMON_GIT_OP to the in-progress operation, or returns 1 if there is none.
 _limon_git_op_state() {
-    local git_dir
-    git_dir="$(git --no-optional-locks rev-parse --git-dir 2>/dev/null)" || return 1
+    __LIMON_GIT_OP=""
+    _limon_git_resolve_dir || return 1
+    local git_dir="$__LIMON_GIT_DIR"
     if [[ -f "$git_dir/MERGE_HEAD" ]]; then
-        echo "MERGING"
+        __LIMON_GIT_OP="MERGING"
     elif [[ -d "$git_dir/rebase-merge" || -d "$git_dir/rebase-apply" ]]; then
-        echo "REBASING"
+        __LIMON_GIT_OP="REBASING"
     elif [[ -f "$git_dir/CHERRY_PICK_HEAD" ]]; then
-        echo "CHERRY-PICK"
+        __LIMON_GIT_OP="CHERRY-PICK"
     else
         return 1
     fi
 }
 
+# Sets __LIMON_STASH_COUNT to the number of stash entries.
+#
+# The stash is a reflog, so its entries can be counted by reading the log file
+# directly. That replaces "git stash list | wc -l | tr -d ' '" — a git process
+# plus two more in a pipeline — with one file read, on a path that runs for
+# every prompt inside a repo. Falls back to git when the file is unreadable
+# (worktrees and unusual layouts).
 _limon_git_stash_count() {
     if [[ $((SECONDS - ${__LIMON_STASH_CACHE_SEC:-0})) -lt 2 && "${__LIMON_STASH_CACHE:-}" =~ ^[0-9]+$ ]]; then
-        echo "$__LIMON_STASH_CACHE"
+        __LIMON_STASH_COUNT="$__LIMON_STASH_CACHE"
         return
     fi
-    local count
-    count="$(git --no-optional-locks stash list 2>/dev/null | wc -l | tr -d ' ')"
-    __LIMON_STASH_CACHE="${count:-0}"
+
+    local count=0
+    local stash_log="${__LIMON_GIT_DIR:-}/logs/refs/stash"
+    if [[ -n "${__LIMON_GIT_DIR:-}" && -r "$stash_log" ]]; then
+        local line
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -n "$line" ]] && (( count++ ))
+        done < "$stash_log"
+    elif [[ -n "${__LIMON_GIT_DIR:-}" ]]; then
+        # No stash reflog means no stashes.
+        count=0
+    else
+        local listed
+        listed="$(git --no-optional-locks stash list 2>/dev/null | wc -l | tr -d ' ')"
+        count="${listed:-0}"
+    fi
+
+    __LIMON_STASH_CACHE="$count"
     __LIMON_STASH_CACHE_SEC=$SECONDS
-    echo "$__LIMON_STASH_CACHE"
+    __LIMON_STASH_COUNT="$count"
 }
 
 _limon_git_lite() {
@@ -1194,7 +1328,7 @@ _limon_git_info() {
 
     local line push_count=0 pull_count=0 got_branch=0
     local staged=0 unstaged=0 untracked=0
-    local op_state marks=""
+    local marks=""
 
     while IFS= read -r line; do
         if [[ "$line" =~ ^## ]]; then
@@ -1225,8 +1359,9 @@ _limon_git_info() {
     if [[ $got_branch -eq 1 ]]; then
         __LIMON_GIT_IN_REPO=1
 
-        op_state="$(_limon_git_op_state 2>/dev/null || true)"
-        [[ -n "$op_state" ]] && marks+=" {$op_state}"
+        if _limon_git_op_state 2>/dev/null && [[ -n "$__LIMON_GIT_OP" ]]; then
+            marks+=" {$__LIMON_GIT_OP}"
+        fi
 
         [[ "${__LIMON_GIT_DETACHED:-0}" == "1" ]] && marks+=" (DETACHED)"
 
@@ -1240,7 +1375,9 @@ _limon_git_info() {
         fi
 
         local stash_n
-        stash_n="$(_limon_git_stash_count 2>/dev/null || echo 0)"
+        _limon_git_resolve_dir 2>/dev/null || true
+        _limon_git_stash_count 2>/dev/null || __LIMON_STASH_COUNT=0
+        stash_n="${__LIMON_STASH_COUNT:-0}"
         [[ "${stash_n:-0}" -gt 0 ]] && marks+=" ≡${stash_n}"
 
         [[ $push_count -gt 0 ]] && marks+=" ↑$push_count"
@@ -1250,7 +1387,8 @@ _limon_git_info() {
 
         _limon_init_symbols
         if [[ "${LIMON_ASCII:-0}" == "1" ]]; then
-            __LIMON_GIT_MARKS="$(_limon_ascii_text "$__LIMON_GIT_MARKS")"
+            _limon_ascii_text "$__LIMON_GIT_MARKS"
+            __LIMON_GIT_MARKS="$__LIMON_ASCII_OUT"
         fi
 
         __LIMON_GIT_CACHE_PWD="$PWD"
@@ -1268,10 +1406,20 @@ _limon_git_info() {
 }
 
 # --- 6. Main Prompt Function ---
-main() {
-    local last_exit="${LAST_EXIT_CODE:-0}"
+# Resolves, validates, and sources a theme once, caching the result in
+# __LIMON_THEME_* globals.
+#
+# main() used to do this on every render: a full line-by-line regex validation
+# pass plus a `source` of the theme file for each prompt, which dominated the
+# render cost and re-printed any theme warnings on every keypress. The cache is
+# keyed on the theme name; `limon reload`, `limon edit`, and `limon config`
+# invalidate it explicitly so an edited theme still takes effect.
+_limon_load_theme() {
     local theme_name="${1:-default}"
 
+    [[ "${__LIMON_THEME_NAME:-}" == "$theme_name" ]] && return 0
+
+    # Built-in defaults; a theme file overrides only the keys it sets.
     local col_ok='\[\e[38;5;44m\]'
     local col_err='\[\e[38;5;160m\]'
     local col_git='\[\e[38;5;214m\]'
@@ -1292,6 +1440,42 @@ main() {
         source "$theme_file"
     fi
 
+    __LIMON_THEME_NAME="$theme_name"
+    __LIMON_THEME_FILE="$theme_file"
+    __LIMON_THEME_COL_OK="$col_ok"
+    __LIMON_THEME_COL_ERR="$col_err"
+    __LIMON_THEME_COL_GIT="$col_git"
+    __LIMON_THEME_COL_DIR="$col_dir"
+    __LIMON_THEME_COL_HOST="$col_host"
+    __LIMON_THEME_COL_TIME="$col_time"
+    __LIMON_THEME_MULTILINE="$theme_multiline"
+    __LIMON_THEME_SEPARATOR="$theme_separator"
+    __LIMON_THEME_SYMBOL_PREFIX="$theme_symbol_prefix"
+    __LIMON_THEME_MAX_PATH="$theme_max_path"
+}
+
+# Drops the cached theme so the next render re-reads it from disk.
+_limon_invalidate_theme_cache() {
+    unset __LIMON_THEME_NAME __LIMON_THEME_FILE
+}
+
+main() {
+    local last_exit="${LAST_EXIT_CODE:-0}"
+    local theme_name="${1:-default}"
+
+    _limon_load_theme "$theme_name"
+
+    local col_ok="$__LIMON_THEME_COL_OK"
+    local col_err="$__LIMON_THEME_COL_ERR"
+    local col_git="$__LIMON_THEME_COL_GIT"
+    local col_dir="$__LIMON_THEME_COL_DIR"
+    local col_host="$__LIMON_THEME_COL_HOST"
+    local col_time="$__LIMON_THEME_COL_TIME"
+    local theme_multiline="$__LIMON_THEME_MULTILINE"
+    local theme_separator="$__LIMON_THEME_SEPARATOR"
+    local theme_symbol_prefix="$__LIMON_THEME_SYMBOL_PREFIX"
+    local theme_max_path="$__LIMON_THEME_MAX_PATH"
+
     local c_reset='\[\e[m\]'
     local c_gray='\[\e[38;5;240m\]'
 
@@ -1302,18 +1486,16 @@ main() {
 
     _limon_init_symbols
     if [[ "${LIMON_ASCII:-0}" == "1" ]]; then
-        theme_symbol_prefix="$(_limon_ascii_text "$theme_symbol_prefix")"
+        _limon_ascii_text "$theme_symbol_prefix"
+        theme_symbol_prefix="$__LIMON_ASCII_OUT"
     fi
 
-    local host_color_code
-    if _limon_use_color; then
-        if host_color_code="$(_limon_host_color_code 2>/dev/null)"; then
-            col_host='\[\e[38;5;'${host_color_code}'m\]'
-        fi
+    if _limon_use_color && _limon_host_color_code 2>/dev/null; then
+        col_host='\[\e[38;5;'${__LIMON_HOSTCOL}'m\]'
     fi
 
-    local safety_str
-    safety_str="$(_limon_safety_prefix "$c_reset" "$col_err")"
+    _limon_safety_prefix "$c_reset" "$col_err"
+    local safety_str="$__LIMON_SAFETY"
 
     local elapsed_str=""
     if [[ ${__LIMON_CMD_ELAPSED:-0} -ge ${LIMON_TIMER_THRESHOLD:-2} ]]; then
@@ -1372,7 +1554,8 @@ main() {
 
     local path_display=""
     if [[ "$path_max" =~ ^[0-9]+$ && "$path_max" -gt 0 ]]; then
-        path_display="$(_limon_display_path "$path_max")"
+        _limon_display_path "$path_max"
+        path_display="$__LIMON_PATH"
     fi
 
     local dir_str=""
@@ -1384,17 +1567,26 @@ main() {
 
     local time_display=""
     if [[ "${LIMON_SHOW_CLOCK:-0}" == "1" ]]; then
-        time_display+="$col_time$(date +%H:%M) "
+        local now_hm
+        printf -v now_hm '%(%H:%M)T' -1
+        time_display+="$col_time$now_hm "
     fi
     [[ -n "$elapsed_str" ]] && time_display+="$col_time$elapsed_str "
 
+    # Counting jobs needs the builtin's output, and capturing builtin output in
+    # bash always costs a subshell. Guard it with `jobs -r %%`, which reports
+    # whether any running job exists without capturing anything: ~6us versus
+    # ~460us, and the expensive path is only taken when there is something to
+    # count. (The original "jobs -rp | wc -l | tr -d ' '" cost three processes.)
     local jobs_str=""
-    local job_count
-    job_count="$(jobs -rp 2>/dev/null | wc -l | tr -d ' ')"
-    [[ "${job_count:-0}" -gt 0 ]] && jobs_str="[$job_count] "
+    if jobs -r %% >/dev/null 2>&1; then
+        local running_jobs
+        mapfile -t running_jobs < <(jobs -rp 2>/dev/null)
+        [[ "${#running_jobs[@]}" -gt 0 ]] && jobs_str="[${#running_jobs[@]}] "
+    fi
 
-    local symbol_str
-    symbol_str="$(_limon_prompt_symbol "$last_exit" "$col_ok" "$col_err" "$c_reset" "$theme_symbol_prefix")"
+    _limon_prompt_symbol "$last_exit" "$col_ok" "$col_err" "$c_reset" "$theme_symbol_prefix"
+    local symbol_str="$__LIMON_SYMBOL"
 
     local ps1=""
     if [[ "$theme_multiline" -eq 1 ]]; then
@@ -1500,6 +1692,7 @@ case "$SUBCOMMAND" in
             unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                   __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
                   __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
+            _limon_invalidate_theme_cache
             _limon_load_config
             export LIMON_TIMER_THRESHOLD LIMON_GIT_MODE LIMON_SHOW_HOST LIMON_SHOW_SSH LIMON_AUTOUPDATE \
                    LIMON_CHANNEL LIMON_ASCII LIMON_MAX_PATH LIMON_HOST_COLOR LIMON_ENV_BANNER LIMON_SHOW_ROOT \
@@ -1574,7 +1767,7 @@ case "$SUBCOMMAND" in
         _limon_do_health
         ;;
     bench|benchmark)
-        _limon_do_bench "${1:-}"
+        _limon_do_bench "${1:-}" "${2:-}"
         ;;
     edit)
         _limon_do_edit "${THEME_NAME:-$saved_theme}"
@@ -1712,6 +1905,7 @@ case "$SUBCOMMAND" in
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
                           __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
+                    _limon_invalidate_theme_cache
                     limon_runner
                 fi
             fi
@@ -1749,6 +1943,7 @@ Usage:
     limon status         Show current state
     limon health         Run install and prompt diagnostics
     limon bench [N]      Benchmark prompt render time (default N=100)
+    limon bench --breakdown  Per-segment render timings
     limon themes         List available themes
     limon edit [theme]   Open theme in \$EDITOR (creates ~/.config/limon/themes/ copy)
     limon preview <theme> Show sample prompt without switching
@@ -1805,6 +2000,7 @@ Diagnostics:
 Performance metrics:
     limon bench                     Measure average prompt render time (100 runs)
     limon bench 500                 Run more iterations for a steadier average
+    limon bench --breakdown         Show which segment costs what
     limon config metrics=1          Record live render time each prompt (shown in status)
     limon config metrics=0          Stop recording live render time (default)
     (render time is wall-clock; needs bash 5+ or GNU date for sub-ms precision)

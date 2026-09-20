@@ -19,11 +19,15 @@ REPO_ROOT="$( cd "$TESTS_DIR/.." && pwd )"
 
 ITERS="${1:-200}"
 
-# Current ceiling. The prompt measures ~25ms today, dominated by re-parsing and
-# re-sourcing the theme file on every render plus a fork per prompt segment.
-# This value pins that baseline so it cannot get worse; the hot-path work in the
-# next phase should bring the mean to roughly 1ms, at which point drop this to 5.
-CEILING_MS="${2:-40}"
+# Ceiling for the mean render time, in milliseconds.
+#
+# Steady-state rendering is ~0.3ms; this measurement deliberately forces a fresh
+# `git status` on every iteration, which puts a real git process in the loop and
+# lands around 3ms on a quiet machine. The ceiling is set well above that so a
+# loaded CI runner cannot make it flaky, while still catching a structural
+# regression — per-render theme parsing or a reintroduced fork per segment would
+# add tens of milliseconds and trip it immediately.
+CEILING_MS="${2:-12}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
