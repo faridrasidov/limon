@@ -29,7 +29,7 @@ it "installs limon_runner into PROMPT_COMMAND"
 assert_contains "$(scenario "on default" 'echo "$PROMPT_COMMAND"')" "limon_runner"
 
 it "preserves the user's existing PROMPT_COMMAND"
-assert_contains "$(scenario "on default" 'echo "$PROMPT_COMMAND"')" "original-pc"
+assert_contains "$(scenario "on default" 'declare -p PROMPT_COMMAND')" "original-pc"
 
 it "replaces PS1"
 assert_not_contains "$(scenario "on default" 'echo "$PS1"')" "original-ps1"
@@ -37,8 +37,11 @@ assert_not_contains "$(scenario "on default" 'echo "$PS1"')" "original-ps1"
 it "records the original PS1 for restoration"
 assert_contains "$(scenario "on default" 'echo "$DEFAULT_PS1"')" "original-ps1"
 
-it "installs a DEBUG trap for the command timer"
-assert_contains "$(scenario "on default" 'trap -p DEBUG')" "_limon_preexec"
+it "installs trap-free PS0 command timing"
+assert_contains "$(scenario "on default" 'printf "%s" "$PS0"')" "__LIMON_CMD_START"
+
+it "does not install a DEBUG trap"
+assert_not_contains "$(scenario "on default" 'trap -p DEBUG')" "_limon_preexec"
 
 it "reports itself active"
 assert_contains "$(scenario "on default" '_limon_is_active && echo ACTIVE')" "ACTIVE"
@@ -54,32 +57,26 @@ assert_not_contains "$(scenario "on default" "source '$LIMON' off >/dev/null 2>&
 it "off restores the user's original PROMPT_COMMAND"
 assert_contains "$(scenario "on default" "source '$LIMON' off >/dev/null 2>&1; echo \"\$PROMPT_COMMAND\"")" "original-pc"
 
-# Bash localizes DEBUG trap changes to `source` contexts and restores them on
-# return, so a sourced script cannot remove the trap — it can only disarm it.
-# What matters is that _limon_preexec no longer runs after `limon off`.
-it "off disarms the DEBUG trap so _limon_preexec no longer runs"
-assert_not_contains "$(scenario "on default" "source '$LIMON' off >/dev/null 2>&1; trap -p DEBUG")" "_limon_preexec"
-
-# KNOWN LIMITATION, pinned here so a future change does not assume otherwise.
-#
-# Bash does not expose the caller's DEBUG trap to a sourced script: `trap -p
-# DEBUG` inside limon.sh returns empty even when the calling shell has one set,
-# and `set -T` does not change that. So DEFAULT_DEBUG_TRAP is always captured
-# empty in normal use, and `limon off` cannot restore a DEBUG trap the user had
-# installed before `limon on` — it disarms the trap instead.
-#
-# This test documents that behavior rather than asserting a fix. If bash ever
-# makes the trap visible, this test will fail and the restore path can be
-# re-enabled.
-it "documents that a pre-existing user DEBUG trap is not restored (bash limitation)"
+it "off removes only Limon's PS0 prefix"
 out="$(env HOME="$HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" TERM=xterm-256color bash -c "
-    PS1='original-ps1> '
-    trap 'true # user-debug-hook' DEBUG
+    PS0='user-ps0'
     source '$LIMON' on default >/dev/null 2>&1
     source '$LIMON' off >/dev/null 2>&1
-    trap -p DEBUG
+    printf '%s' \"\$PS0\"
 ")"
-assert_not_contains "$out" "_limon_preexec"
+assert_eq "user-ps0" "$out"
+
+it "off preserves PROMPT_COMMAND changes made while Limon is active"
+out="$(scenario "on default" "
+    if [[ \"\$(declare -p PROMPT_COMMAND 2>/dev/null)\" == 'declare -a'* ]]; then
+        PROMPT_COMMAND+=('echo added-later')
+    else
+        PROMPT_COMMAND=\"\$PROMPT_COMMAND; echo added-later\"
+    fi
+    source '$LIMON' off >/dev/null 2>&1
+    declare -p PROMPT_COMMAND
+")"
+assert_contains "$out" "added-later"
 
 it "_limon_preexec is inert once Limon is off"
 out="$(scenario "on default" "
@@ -90,6 +87,28 @@ out="$(scenario "on default" "
 ")"
 assert_contains "$out" "active=0"
 
+if (( BASH_VERSINFO[0] > 5 || BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1 )); then
+    it "preserves PROMPT_COMMAND arrays on bash 5.1+"
+    out="$(env HOME="$HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" TERM=xterm-256color bash -c "
+        PS1='original> '
+        PROMPT_COMMAND=('echo first' 'echo second')
+        source '$LIMON' on default >/dev/null 2>&1
+        declare -p PROMPT_COMMAND
+    ")"
+    assert_contains "$out" 'declare -a PROMPT_COMMAND=([0]="limon_runner" [1]="echo first" [2]="echo second")'
+
+    it "off removes its array element without erasing other hooks"
+    out="$(env HOME="$HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" TERM=xterm-256color bash -c "
+        PS1='original> '
+        PROMPT_COMMAND=('echo first' 'echo second')
+        source '$LIMON' on default >/dev/null 2>&1
+        PROMPT_COMMAND+=('echo third')
+        source '$LIMON' off >/dev/null 2>&1
+        declare -p PROMPT_COMMAND
+    ")"
+    assert_contains "$out" '[2]="echo third"'
+fi
+
 it "off reports itself inactive"
 assert_contains "$(scenario "on default" "source '$LIMON' off >/dev/null 2>&1; _limon_is_active || echo INACTIVE")" "INACTIVE"
 
@@ -99,21 +118,21 @@ it "re-enabling does not duplicate limon_runner in PROMPT_COMMAND"
 out="$(scenario "on default" "
     source '$LIMON' off >/dev/null 2>&1
     source '$LIMON' on default >/dev/null 2>&1
-    grep -o limon_runner <<< \"\$PROMPT_COMMAND\" | wc -l
+    declare -p PROMPT_COMMAND | grep -o limon_runner | wc -l
 ")"
 assert_eq "1" "$out"
 
 it "re-enabling twice in a row does not duplicate limon_runner"
 out="$(scenario "on default" "
     source '$LIMON' on default >/dev/null 2>&1
-    grep -o limon_runner <<< \"\$PROMPT_COMMAND\" | wc -l
+    declare -p PROMPT_COMMAND | grep -o limon_runner | wc -l
 ")"
 assert_eq "1" "$out"
 
 it "re-enabling does not duplicate the user's PROMPT_COMMAND"
 out="$(scenario "on default" "
     source '$LIMON' on default >/dev/null 2>&1
-    grep -o original-pc <<< \"\$PROMPT_COMMAND\" | wc -l
+    declare -p PROMPT_COMMAND | grep -o original-pc | wc -l
 ")"
 assert_eq "1" "$out"
 

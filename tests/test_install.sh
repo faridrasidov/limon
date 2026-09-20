@@ -61,6 +61,12 @@ assert_ok test -f "$TARGET/limon.sh"
 it "install puts the completion script in the target directory"
 assert_ok test -f "$TARGET/hint-limon.sh"
 
+it "install puts the bundled autosuggestion engine in the target directory"
+assert_ok test -f "$TARGET/vendor/blesh/ble.sh"
+
+it "install includes the third-party license notice"
+assert_ok test -f "$TARGET/THIRD_PARTY_NOTICES.md"
+
 it "install copies the themes"
 assert_ok test -f "$TARGET/themes/default.theme"
 
@@ -72,6 +78,9 @@ assert_contains "$(cat "$BASHRC")" "alias limon="
 
 it "install enables the prompt on startup"
 assert_contains "$(cat "$BASHRC")" "limon.sh on"
+
+it "install does not override the terminal type"
+assert_not_contains "$(cat "$BASHRC")" "export TERM="
 
 it "install tells the user what to do next"
 assert_contains "$install_out" "source ~/.bashrc"

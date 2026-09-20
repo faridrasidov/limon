@@ -1,0 +1,127 @@
+#!/usr/bin/expect -f
+#
+# Interactive (PTY) checks for ghost autosuggestions.
+#
+# Three independent cases, each able to fail on its own:
+#   1. the ghost renders for a history match
+#   2. Right Arrow accepts it, and the FULL command runs
+#   3. `limon off` disables suggestions
+#
+# Two rules this file learned the hard way:
+#
+#   * Never assert on a fixed sleep. ble.sh redraws asynchronously, so
+#     "type, sleep, press key" races the editor. Wait for the thing itself.
+#   * Never assert that the accepted text merely appeared on screen. The
+#     command line echoes its own text, so "echo LIMON_GHOST_OK" is visible
+#     whether or not the suggestion was accepted. Case 2 therefore checks a
+#     side effect that only the FULL command can produce.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set timeout 15
+set limon [lindex $argv 0]
+set home $env(HOME)
+set xdg_config [expr {[info exists env(XDG_CONFIG_HOME)] ? $env(XDG_CONFIG_HOME) : "$home/.config"}]
+
+set flag "$home/ghost-accepted.flag"
+set typed "touch $home/ghost-acc"
+set ghost_tail "epted.flag"
+
+# Keep the remembered command plain: no backslashes, no % escapes. Those render
+# oddly inside the ghost text and truncate the suggestion, which is a property
+# of the display, not of acceptance, and not what this test is measuring.
+set history [open "$home/.bash_history" w]
+puts $history "touch $flag"
+close $history
+
+proc die {stage msg} {
+    puts "\n\[autosuggest.exp\] FAILED at $stage: $msg"
+    exit 1
+}
+
+# USER and LANG are set explicitly: the bash:* CI images define neither, and
+# ble.sh then warns about an "insane environment" and runs without a UTF-8
+# locale — a configuration no real user has, so the test should not exercise it.
+spawn env HOME=$home XDG_CONFIG_HOME=$xdg_config TERM=xterm-256color \
+    USER=[exec id -un] LANG=C.utf8 LC_ALL=C.utf8 bash --noprofile --norc -i
+
+# Give the PTY a generous width before ble.sh starts. The default is 80, and
+# Limon's own prompt plus a realistic command overflows it, which makes the
+# suggestion wrap. This test is about suggestions, not line wrapping, so take
+# wrapping out of the equation rather than tuning command lengths to fit.
+stty columns 200 rows 50 < $spawn_out(slave,name)
+
+send -- "source \"$limon\" on default; echo LIMON_PTY_READY\r"
+expect {
+    "LIMON_PTY_READY" {}
+    timeout { die "startup" "prompt never became ready" }
+    eof     { die "startup" "shell exited during startup" }
+}
+
+# --- case 1: the ghost renders ----------------------------------------------
+#
+# Only the suggestion can put the remainder on screen; the typed prefix stops
+# short of it. Waiting for it also replaces the old fixed `after 600`.
+
+send -- $typed
+expect {
+    -re $ghost_tail {}
+    timeout { die "case 1" "no ghost suggestion appeared for a history match" }
+    eof     { die "case 1" "shell exited while waiting for the suggestion" }
+}
+
+# --- case 2: Right Arrow accepts it, and the whole command runs -------------
+#
+# Only the full remembered command prints RESULT_YES. Had the typed prefix run
+# on its own it would have created a file called "ghost-acc" and printed
+# nothing, so this distinguishes "accepted" from "merely displayed".
+
+send -- "\033\[C"
+send -- "\r"
+
+# Acceptance is proved by a side effect on disk, polled from here, rather than
+# by matching terminal output. The command line echoes its own text, so any
+# on-screen match would be satisfied whether or not the suggestion was
+# accepted; and waiting for the prompt to return would re-introduce the very
+# race this file exists to avoid.
+set accepted 0
+for {set i 0} {$i < 100} {incr i} {
+    if {[file exists $flag]} { set accepted 1; break }
+    after 100
+}
+if {!$accepted} {
+    if {[file exists "$home/ghost-acc"]} {
+        die "case 2" "Right Arrow did not accept: the typed prefix ran on its own"
+    }
+    die "case 2" "Right Arrow did not accept the suggestion: nothing ran within 10s"
+}
+if {[file exists "$home/ghost-acc"]} { die "case 2" "the typed prefix ran as well as the accepted command" }
+
+# --- case 3: limon off disables suggestions ---------------------------------
+#
+# One command line, not two: sending a follow-up while `limon off` is detaching
+# races ble.sh and the keystrokes get swallowed. The answer goes to a file and
+# is read from here, for the same reason case 2 does.
+
+set offout "$home/off-state.txt"
+send -- "source \"$limon\" off; printf '%s:%s' \"\${__LIMON_ACTIVE:-0}\" \"\${bleopt_complete_auto_complete:-disabled}\" > $offout\r"
+
+set got ""
+for {set i 0} {$i < 100} {incr i} {
+    if {[file exists $offout]} {
+        set fh [open $offout r]
+        set got [string trim [read $fh]]
+        close $fh
+        if {$got ne ""} { break }
+    }
+    after 100
+}
+
+if {$got eq ""} { die "case 3" "limon off produced no state within 10s" }
+if {$got ne "0:disabled"} {
+    die "case 3" "after limon off expected active=0 and suggestions disabled, got \"$got\""
+}
+
+send -- "exit\r"
+expect eof
+exit 0

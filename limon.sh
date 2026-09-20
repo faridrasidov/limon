@@ -14,16 +14,17 @@
 # limon - Optimized Bash Prompt
 # Features: 256-Color ANSI Support, Color Picker, Silent Default, Modular Themes
 
-LIMON_VERSION="1.1.0"
+LIMON_VERSION="1.2.0"
 
 # --- 0. Bash version gate ---
 #
-# Limon needs bash 4.0+ (mapfile, ${var^^}). macOS still ships bash 3.2 as
+# Limon needs bash 4.4+ (including PS0 for trap-free native timing). macOS still ships bash 3.2 as
 # /bin/bash, so without this check those users hit a confusing syntax or
 # "command not found" error somewhere deep in the script instead of a clear
 # message. Fail here, before anything touches PS1 or PROMPT_COMMAND.
-if [[ -z "${BASH_VERSINFO[0]:-}" ]] || (( BASH_VERSINFO[0] < 4 )); then
-    echo "limon: requires bash 4.0 or newer (found ${BASH_VERSION:-unknown})." >&2
+if [[ -z "${BASH_VERSINFO[0]:-}" ]] || \
+   (( BASH_VERSINFO[0] < 4 || BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4 )); then
+    echo "limon: requires bash 4.4 or newer (found ${BASH_VERSION:-unknown})." >&2
     if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
         echo "limon: macOS ships bash 3.2 as /bin/bash. Install a newer bash with:" >&2
         echo "limon:   brew install bash" >&2
@@ -33,34 +34,9 @@ if [[ -z "${BASH_VERSINFO[0]:-}" ]] || (( BASH_VERSINFO[0] < 4 )); then
 fi
 
 # --- 1. Self-Healing & Safety ---
-if [[ "${DEFAULT_PROMPT_COMMAND:-}" == *"not found"* ]] || \
-   [[ "${DEFAULT_PROMPT_COMMAND:-}" == *"limon_runner"* ]]; then
-    DEFAULT_PROMPT_COMMAND=""
-fi
-
 if [ -z "${DEFAULT_PS1:-}" ]; then
     DEFAULT_PS1="${PS1:-}"
     export DEFAULT_PS1
-fi
-
-if [[ -z "${PROMPT_COMMAND:-}" ]]; then
-    DEFAULT_PROMPT_COMMAND=""
-else
-    if [[ "${PROMPT_COMMAND}" != *"limon_runner"* ]]; then
-        DEFAULT_PROMPT_COMMAND="${PROMPT_COMMAND}"
-    fi
-fi
-export DEFAULT_PROMPT_COMMAND
-
-# Best-effort capture of a DEBUG trap the user had before Limon.
-#
-# Note: bash does not expose the caller's DEBUG trap to a sourced script, so in
-# normal use (`source limon.sh on`) this is always empty and `limon off` cannot
-# restore a pre-existing trap — it disarms the trap instead. Kept so an inherited
-# DEFAULT_DEBUG_TRAP from a parent shell is still honored. See the lifecycle test.
-if [[ -z "${DEFAULT_DEBUG_TRAP+x}" ]]; then
-    DEFAULT_DEBUG_TRAP="$(trap -p DEBUG 2>/dev/null || true)"
-    export DEFAULT_DEBUG_TRAP
 fi
 
 # --- 2. Path & Config Setup ---
@@ -92,6 +68,9 @@ LIMON_SHOW_EXIT=0
 LIMON_EXIT_HINTS=0
 LIMON_SHOW_CLOCK=0
 LIMON_METRICS=0
+LIMON_AUTOSUGGEST=1
+LIMON_AUTOSUGGEST_DELAY=100
+LIMON_AUTOSUGGEST_COLOR=auto
 
 # The one-line install command, shown wherever a non-git install needs updating.
 LIMON_INSTALL_ONELINER='curl -fsSL https://raw.githubusercontent.com/faridrasidov/limon/master/get-limon.sh | bash'
@@ -165,6 +144,9 @@ _limon_load_config() {
     LIMON_EXIT_HINTS=0
     LIMON_SHOW_CLOCK=0
     LIMON_METRICS=0
+    LIMON_AUTOSUGGEST=1
+    LIMON_AUTOSUGGEST_DELAY=100
+    LIMON_AUTOSUGGEST_COLOR=auto
 
     if [[ -f "$LIMON_CONF" ]]; then
         read -r -a conf_parts < "$LIMON_CONF"
@@ -188,6 +170,9 @@ _limon_load_config() {
                 -exit_hints=*) LIMON_EXIT_HINTS="${part#*=}" ;;
                 -clock=*) LIMON_SHOW_CLOCK="${part#*=}" ;;
                 -metrics=*) LIMON_METRICS="${part#*=}" ;;
+                -autosuggest=*) LIMON_AUTOSUGGEST="${part#*=}" ;;
+                -autosuggest_delay=*) LIMON_AUTOSUGGEST_DELAY="${part#*=}" ;;
+                -autosuggest_color=*) LIMON_AUTOSUGGEST_COLOR="${part#*=}" ;;
                 -*) ;;
                 *) saved_theme="$part" ;;
             esac
@@ -229,16 +214,17 @@ _limon_conf_flags() {
     [[ "$LIMON_EXIT_HINTS" != "0" ]] && flags+=("-exit_hints=$LIMON_EXIT_HINTS")
     [[ "$LIMON_SHOW_CLOCK" != "0" ]] && flags+=("-clock=$LIMON_SHOW_CLOCK")
     [[ "$LIMON_METRICS" != "0" ]] && flags+=("-metrics=$LIMON_METRICS")
+    [[ "$LIMON_AUTOSUGGEST" != "1" ]] && flags+=("-autosuggest=$LIMON_AUTOSUGGEST")
+    [[ "$LIMON_AUTOSUGGEST_DELAY" != "100" ]] && flags+=("-autosuggest_delay=$LIMON_AUTOSUGGEST_DELAY")
+    [[ "$LIMON_AUTOSUGGEST_COLOR" != "auto" ]] && flags+=("-autosuggest_color=$LIMON_AUTOSUGGEST_COLOR")
     printf '%s\n' "${flags[@]}"
 }
 
 _limon_is_active() {
-    [[ "${PROMPT_COMMAND:-}" == *"limon_runner"* ]]
+    [[ "${__LIMON_ACTIVE:-0}" == "1" ]]
 }
 
 _limon_preexec() {
-    # The DEBUG trap can outlive `limon off` (bash will not let a sourced script
-    # clear it), so bail out when Limon is not driving the prompt.
     _limon_is_active || return 0
     [[ "${__LIMON_IN_PROMPT:-0}" == "1" ]] && return 0
     [[ "${BASH_COMMAND:-}" == "limon_runner"* ]] && return 0
@@ -258,6 +244,189 @@ _limon_preexec() {
         fi
         __LIMON_CMD_START=$SECONDS
         __LIMON_CMD_ACTIVE=1
+    fi
+}
+
+_limon_bash_has_prompt_array() {
+    (( BASH_VERSINFO[0] > 5 || BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1 ))
+}
+
+_limon_prompt_hook_add() {
+    _limon_prompt_hook_remove
+
+    if _limon_bash_has_prompt_array; then
+        local declaration item
+        local -a previous=()
+        declaration="$(declare -p PROMPT_COMMAND 2>/dev/null || true)"
+        if [[ "$declaration" == "declare -a"* ]]; then
+            previous=("${PROMPT_COMMAND[@]}")
+        elif [[ -n "${PROMPT_COMMAND:-}" ]]; then
+            previous=("$PROMPT_COMMAND")
+        fi
+
+        declare -ga PROMPT_COMMAND=()
+        PROMPT_COMMAND+=(limon_runner)
+        for item in "${previous[@]}"; do
+            [[ "$item" == "limon_runner" ]] || PROMPT_COMMAND+=("$item")
+        done
+    else
+        # shellcheck disable=SC2128,SC2178
+        PROMPT_COMMAND="limon_runner${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+    fi
+}
+
+_limon_prompt_hook_remove() {
+    local declaration item
+    declaration="$(declare -p PROMPT_COMMAND 2>/dev/null || true)"
+    if [[ "$declaration" == "declare -a"* ]]; then
+        local -a kept=()
+        for item in "${PROMPT_COMMAND[@]}"; do
+            [[ "$item" == "limon_runner" ]] || kept+=("$item")
+        done
+        declare -ga PROMPT_COMMAND=()
+        PROMPT_COMMAND=("${kept[@]}")
+    else
+        # shellcheck disable=SC2178
+        case "${PROMPT_COMMAND:-}" in
+            limon_runner) PROMPT_COMMAND="" ;;
+            "limon_runner; "*) PROMPT_COMMAND="${PROMPT_COMMAND#"limon_runner; "}" ;;
+        esac
+    fi
+}
+
+_limon_prompt_hook_present() {
+    local declaration item
+    declaration="$(declare -p PROMPT_COMMAND 2>/dev/null || true)"
+    if [[ "$declaration" == "declare -a"* ]]; then
+        for item in "${PROMPT_COMMAND[@]}"; do
+            [[ "$item" == "limon_runner" ]] && return 0
+        done
+        return 1
+    fi
+    [[ "${PROMPT_COMMAND:-}" == "limon_runner" || "${PROMPT_COMMAND:-}" == "limon_runner; "* ]]
+}
+
+_limon_native_timer_add() {
+    _limon_native_timer_remove
+    __LIMON_PS0_PREFIX='${__LIMON_PS0[$((__LIMON_CMD_START=SECONDS,__LIMON_CMD_START_US=0,__LIMON_CMD_ACTIVE=1,0))]-}${EPOCHREALTIME:+${__LIMON_PS0[$((__LIMON_CMD_START_US=10#${EPOCHREALTIME/./},0))]-}}'
+    PS0="$__LIMON_PS0_PREFIX${PS0-}"
+}
+
+_limon_native_timer_remove() {
+    if [[ -n "${__LIMON_PS0_PREFIX:-}" && "${PS0-}" == "$__LIMON_PS0_PREFIX"* ]]; then
+        PS0="${PS0#"$__LIMON_PS0_PREFIX"}"
+    fi
+    unset __LIMON_PS0_PREFIX
+}
+
+_limon_editor_can_start() {
+    [[ $- == *i* && -t 0 && -t 1 && "${TERM:-}" != "dumb" && -n "${TERM:-}" ]]
+}
+
+_limon_ble_save_config() {
+    [[ "${__LIMON_BLE_CONFIG_SAVED:-0}" == "1" ]] && return 0
+    __LIMON_BLE_COMPLETE_AUTO_COMPLETE="${bleopt_complete_auto_complete-}"
+    __LIMON_BLE_COMPLETE_AUTO_HISTORY="${bleopt_complete_auto_history-}"
+    __LIMON_BLE_COMPLETE_AUTO_DELAY="${bleopt_complete_auto_delay-}"
+    __LIMON_BLE_HIGHLIGHT_SYNTAX="${bleopt_highlight_syntax-}"
+    __LIMON_BLE_HIGHLIGHT_FILENAME="${bleopt_highlight_filename-}"
+    __LIMON_BLE_HIGHLIGHT_VARIABLE="${bleopt_highlight_variable-}"
+    __LIMON_BLE_COMPLETE_AMBIGUOUS="${bleopt_complete_ambiguous-}"
+    __LIMON_BLE_COMPLETE_MENU_COMPLETE="${bleopt_complete_menu_complete-}"
+    __LIMON_BLE_COMPLETE_MENU_FILTER="${bleopt_complete_menu_filter-}"
+    __LIMON_BLE_PROMPT_EOL_MARK="${bleopt_prompt_eol_mark-}"
+    __LIMON_BLE_EXEC_ERREXIT_MARK="${bleopt_exec_errexit_mark-}"
+
+    local line
+    __LIMON_BLE_FACE_AUTO_COMPLETE=""
+    while IFS= read -r line; do
+        [[ "$line" == "ble-face auto_complete="* ]] &&
+            __LIMON_BLE_FACE_AUTO_COMPLETE="${line#*=}"
+    done < <(ble-face --color=never auto_complete 2>/dev/null)
+    __LIMON_BLE_CONFIG_SAVED=1
+}
+
+_limon_ble_configure() {
+    command -v bleopt >/dev/null 2>&1 || return 1
+    command -v blehook >/dev/null 2>&1 || return 1
+    command -v ble-face >/dev/null 2>&1 || return 1
+
+    _limon_ble_save_config
+    bleopt highlight_syntax= highlight_filename= highlight_variable= \
+        complete_ambiguous= complete_menu_complete= complete_menu_filter= \
+        prompt_eol_mark= exec_errexit_mark= >/dev/null 2>&1 || true
+
+    if [[ "${LIMON_AUTOSUGGEST:-1}" == "1" ]]; then
+        bleopt complete_auto_complete=1 complete_auto_history=1 \
+            "complete_auto_delay=${LIMON_AUTOSUGGEST_DELAY:-100}" >/dev/null 2>&1 || true
+        local color="${LIMON_AUTOSUGGEST_COLOR:-auto}"
+        [[ "$color" == "auto" ]] && color=242
+        ble-face "auto_complete=fg=$color" >/dev/null 2>&1 || true
+    else
+        bleopt complete_auto_complete= >/dev/null 2>&1 || true
+    fi
+
+    blehook PREEXEC!=_limon_preexec
+    blehook PRECMD!=limon_runner
+}
+
+_limon_ble_restore() {
+    if command -v blehook >/dev/null 2>&1; then
+        blehook PREEXEC-=_limon_preexec PRECMD-=limon_runner >/dev/null 2>&1 || true
+    fi
+    if [[ "${__LIMON_BLE_CONFIG_SAVED:-0}" == "1" ]] && command -v bleopt >/dev/null 2>&1; then
+        if [[ "${__LIMON_BLE_OWNED:-0}" == "1" ]]; then
+            # ble.sh's supported detach deliberately leaves a recovery command
+            # in Readline. Keep Limon's private instance resident but inert;
+            # Bash drops it naturally when this shell exits.
+            bleopt complete_auto_complete= complete_auto_history= \
+                highlight_syntax= highlight_filename= highlight_variable= \
+                complete_ambiguous= complete_menu_complete= complete_menu_filter= \
+                prompt_eol_mark= exec_errexit_mark= >/dev/null 2>&1 || true
+        else
+            bleopt \
+                "complete_auto_complete=${__LIMON_BLE_COMPLETE_AUTO_COMPLETE-}" \
+                "complete_auto_history=${__LIMON_BLE_COMPLETE_AUTO_HISTORY-}" \
+                "complete_auto_delay=${__LIMON_BLE_COMPLETE_AUTO_DELAY-}" \
+                "highlight_syntax=${__LIMON_BLE_HIGHLIGHT_SYNTAX-}" \
+                "highlight_filename=${__LIMON_BLE_HIGHLIGHT_FILENAME-}" \
+                "highlight_variable=${__LIMON_BLE_HIGHLIGHT_VARIABLE-}" \
+                "complete_ambiguous=${__LIMON_BLE_COMPLETE_AMBIGUOUS-}" \
+                "complete_menu_complete=${__LIMON_BLE_COMPLETE_MENU_COMPLETE-}" \
+                "complete_menu_filter=${__LIMON_BLE_COMPLETE_MENU_FILTER-}" \
+                "prompt_eol_mark=${__LIMON_BLE_PROMPT_EOL_MARK-}" \
+                "exec_errexit_mark=${__LIMON_BLE_EXEC_ERREXIT_MARK-}" >/dev/null 2>&1 || true
+            if [[ -n "${__LIMON_BLE_FACE_AUTO_COMPLETE:-}" ]] && command -v ble-face >/dev/null 2>&1; then
+                ble-face "auto_complete=$__LIMON_BLE_FACE_AUTO_COMPLETE" >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+    unset __LIMON_BLE_CONFIG_SAVED __LIMON_BLE_COMPLETE_AUTO_COMPLETE \
+          __LIMON_BLE_COMPLETE_AUTO_HISTORY __LIMON_BLE_COMPLETE_AUTO_DELAY \
+          __LIMON_BLE_HIGHLIGHT_SYNTAX __LIMON_BLE_HIGHLIGHT_FILENAME \
+          __LIMON_BLE_HIGHLIGHT_VARIABLE __LIMON_BLE_COMPLETE_AMBIGUOUS \
+          __LIMON_BLE_COMPLETE_MENU_COMPLETE __LIMON_BLE_COMPLETE_MENU_FILTER \
+          __LIMON_BLE_PROMPT_EOL_MARK __LIMON_BLE_EXEC_ERREXIT_MARK \
+          __LIMON_BLE_FACE_AUTO_COMPLETE
+}
+
+_limon_hooks_remove() {
+    _limon_ble_restore
+    unset __LIMON_BLE_ATTACHED_BY_LIMON
+    _limon_prompt_hook_remove
+    _limon_native_timer_remove
+    __LIMON_HOOK_PROVIDER=none
+}
+
+_limon_bash_completion_state() {
+    if [[ -n "${BASH_COMPLETION_VERSINFO[0]:-}" ]]; then
+        echo "loaded (${BASH_COMPLETION_VERSINFO[*]})"
+    elif complete -p 2>/dev/null | grep -qv ' limon$'; then
+        echo "loaded"
+    elif [[ -r /usr/share/bash-completion/bash_completion || -r /etc/bash_completion ]]; then
+        echo "available, not loaded"
+    else
+        echo "not found (history, commands, and paths still work)"
     fi
 }
 
@@ -308,10 +477,10 @@ _limon_do_health() {
     echo "Limon health check (v$LIMON_VERSION)"
     echo ""
 
-    if [[ "${BASH_VERSINFO[0]:-0}" -ge 4 ]]; then
+    if (( BASH_VERSINFO[0] > 4 || BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 )); then
         _limon_health_msg OK "bash ${BASH_VERSION}"
     else
-        _limon_health_msg FAIL "bash ${BASH_VERSION} (4.0+ required)"
+        _limon_health_msg FAIL "bash ${BASH_VERSION} (4.4+ required)"
         ((issues++)) || true
     fi
 
@@ -372,15 +541,33 @@ _limon_do_health() {
             _limon_health_msg FAIL "PS1 has unbalanced \\[ \\] markers"
             ((issues++)) || true
         fi
-        if [[ "${PROMPT_COMMAND:-}" == *"limon_runner"* ]]; then
-            _limon_health_msg OK "limon_runner hooked in PROMPT_COMMAND"
-        else
-            _limon_health_msg FAIL "prompt active but limon_runner missing from PROMPT_COMMAND"
-            ((issues++)) || true
-        fi
+        case "${__LIMON_HOOK_PROVIDER:-none}" in
+            ble)
+                local ble_hooks=""
+                command -v blehook >/dev/null 2>&1 && ble_hooks="$(blehook PREEXEC PRECMD 2>/dev/null || true)"
+                if [[ "$ble_hooks" == *"_limon_preexec"* && "$ble_hooks" == *"limon_runner"* ]]; then
+                    _limon_health_msg OK "timer and prompt use ble.sh PREEXEC/PRECMD hooks"
+                else
+                    _limon_health_msg FAIL "ble.sh hooks are incomplete"
+                    ((issues++)) || true
+                fi
+                ;;
+            native)
+                if _limon_prompt_hook_present && [[ "${PS0-}" == "${__LIMON_PS0_PREFIX:-missing}"* ]]; then
+                    _limon_health_msg OK "timer uses PS0; prompt uses composable PROMPT_COMMAND"
+                else
+                    _limon_health_msg FAIL "native prompt or timer hook is missing"
+                    ((issues++)) || true
+                fi
+                ;;
+            *)
+                _limon_health_msg FAIL "prompt active but hook provider is unknown"
+                ((issues++)) || true
+                ;;
+        esac
     else
         _limon_health_msg OK "prompt off"
-        if [[ "${PROMPT_COMMAND:-}" == *"limon_runner"* ]]; then
+        if _limon_prompt_hook_present; then
             _limon_health_msg FAIL "limon_runner still in PROMPT_COMMAND (run 'limon off')"
             ((issues++)) || true
         else
@@ -390,20 +577,26 @@ _limon_do_health() {
 
     local debug_trap
     debug_trap="$(trap -p DEBUG 2>/dev/null || true)"
-    if _limon_is_active && [[ "$debug_trap" == *"_limon_preexec"* ]]; then
-        _limon_health_msg OK "DEBUG trap installed for command timing"
-    elif _limon_is_active && [[ -n "$debug_trap" ]]; then
-        _limon_health_msg WARN "DEBUG trap is set by another tool (command timer may be inaccurate)"
-        ((warnings++)) || true
-    elif _limon_is_active; then
-        _limon_health_msg WARN "DEBUG trap missing (command timer unavailable)"
-        ((warnings++)) || true
-    elif [[ "$debug_trap" == *"_limon_preexec"* ]]; then
-        _limon_health_msg WARN "limon DEBUG trap still set while prompt is off"
-        ((warnings++)) || true
+    if [[ "$debug_trap" == *"_limon_preexec"* ]]; then
+        _limon_health_msg FAIL "legacy Limon DEBUG trap is still installed"
+        ((issues++)) || true
     else
-        _limon_health_msg OK "no command timing trap"
+        _limon_health_msg OK "no Limon DEBUG trap"
     fi
+
+    if [[ "${LIMON_AUTOSUGGEST:-1}" == "1" ]]; then
+        case "${__LIMON_EDITOR_PROVIDER:-none}" in
+            ble-bundled) _limon_health_msg OK "ghost autosuggestions (bundled ble.sh ${BLE_VERSION:-unknown})" ;;
+            ble-external) _limon_health_msg OK "ghost autosuggestions (existing ble.sh ${BLE_VERSION:-unknown})" ;;
+            *)
+                _limon_health_msg WARN "ghost autosuggestions unavailable in this session"
+                ((warnings++)) || true
+                ;;
+        esac
+    else
+        _limon_health_msg OK "ghost autosuggestions disabled by config"
+    fi
+    _limon_health_msg OK "bash-completion $(_limon_bash_completion_state)"
 
     if [[ -r "$SCRIPT_DIR/limon.sh" ]]; then
         _limon_health_msg OK "install $SCRIPT_DIR"
@@ -1247,14 +1440,12 @@ _limon_do_preview() {
     echo ""
 }
 
-# Restore the current shell's prompt and forget Limon state (used by off/uninstall).
-# Restores everything except the DEBUG trap. Bash scopes DEBUG trap changes made
-# inside a function to that function and restores the previous trap on return, so
-# `trap - DEBUG` here would silently do nothing — the caller must reset it at the
-# top level. See the `off` case arm.
+# Restore the current shell's prompt and remove only state owned by Limon.
 _limon_restore_session() {
+    __LIMON_ACTIVE=0
+    _limon_hooks_remove
+    __LIMON_EDITOR_PROVIDER=inactive
     export PS1="${DEFAULT_PS1:-}"
-    PROMPT_COMMAND="${DEFAULT_PROMPT_COMMAND:-}"
     unset timer LAST_EXIT_CODE 2>/dev/null || true
     unset __LIMON_CMD_START __LIMON_CMD_START_US __LIMON_CMD_ELAPSED \
           __LIMON_CMD_ELAPSED_MS __LIMON_TIMER_HIRES __LIMON_CMD_ACTIVE __LIMON_IN_PROMPT \
@@ -1767,14 +1958,71 @@ fi
 
 case "$SUBCOMMAND" in
     on)
-        PROMPT_COMMAND="limon_runner${DEFAULT_PROMPT_COMMAND:+; $DEFAULT_PROMPT_COMMAND}"
+        __LIMON_ACTIVE=0
+        _limon_hooks_remove
+        # Neutralize the 1.1.x timing hook during an in-place upgrade. Limon
+        # 1.2 never installs a DEBUG trap of its own.
+        if [[ "$(trap -p DEBUG 2>/dev/null || true)" == *"_limon_preexec"* ]]; then
+            trap '' DEBUG 2>/dev/null || true
+        fi
+
+        __LIMON_ACTIVE=1
+        __LIMON_EDITOR_PROVIDER=native
+        __LIMON_HOOK_PROVIDER=native
+
+        if _limon_editor_can_start && [[ -n "${BLE_VERSION:-}" ]]; then
+            if [[ "${__LIMON_BLE_OWNED:-0}" == "1" ]]; then
+                __LIMON_EDITOR_PROVIDER=ble-bundled
+            else
+                __LIMON_EDITOR_PROVIDER=ble-external
+            fi
+        elif _limon_editor_can_start && [[ "${LIMON_AUTOSUGGEST:-1}" == "1" ]] &&
+             [[ -r "$SCRIPT_DIR/vendor/blesh/ble.sh" ]]; then
+            # This source must stay at top level. ble.sh explicitly recommends
+            # against loading its editor from inside a shell function.
+            __LIMON_BLE_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}"
+            if mkdir -p "$__LIMON_BLE_CACHE_ROOT" 2>/dev/null; then
+                # shellcheck source=/dev/null
+                if source -- "$SCRIPT_DIR/vendor/blesh/ble.sh" --attach=none --norc; then
+                    __LIMON_BLE_OWNED=1
+                    __LIMON_EDITOR_PROVIDER=ble-bundled
+                else
+                    echo "limon: bundled autosuggestion engine failed to load; using native prompt hooks" >&2
+                fi
+            else
+                echo "limon: cannot create the editor cache; using native prompt hooks" >&2
+            fi
+            unset __LIMON_BLE_CACHE_ROOT
+        fi
+
+        if [[ "$__LIMON_EDITOR_PROVIDER" == ble-* ]] && _limon_ble_configure; then
+            __LIMON_HOOK_PROVIDER=ble
+        else
+            __LIMON_EDITOR_PROVIDER=native
+            __LIMON_HOOK_PROVIDER=native
+            _limon_prompt_hook_add
+            _limon_native_timer_add
+        fi
+
         LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
         __LIMON_CMD_ELAPSED=0
         __LIMON_CMD_ACTIVE=0
         limon_runner
         _limon_load_hints
         _limon_maybe_autoupdate
-        trap '_limon_preexec' DEBUG
+
+        if [[ "$__LIMON_HOOK_PROVIDER" == "ble" && -z "${_ble_attached:-}" ]]; then
+            __LIMON_BLE_ATTACHED_BY_LIMON=1
+            if ! ble-attach; then
+                echo "limon: autosuggestion editor could not attach; using native prompt hooks" >&2
+                _limon_ble_restore
+                unset __LIMON_BLE_ATTACHED_BY_LIMON
+                __LIMON_EDITOR_PROVIDER=native
+                __LIMON_HOOK_PROVIDER=native
+                _limon_prompt_hook_add
+                _limon_native_timer_add
+            fi
+        fi
         ;;
     upgrade|update)
         _limon_do_upgrade "${1:-}"
@@ -1784,14 +2032,9 @@ case "$SUBCOMMAND" in
         ;;
     off)
         _limon_restore_session
-        # Must happen here, not inside _limon_restore_session: bash localizes
-        # DEBUG trap changes to function and `source` contexts and restores the
-        # previous trap on return. Setting a trap propagates out; *clearing* one
-        # with `trap - DEBUG` does not, so disarming it with an empty action is
-        # the only thing that actually takes effect in the user's shell.
-        if [[ -n "${DEFAULT_DEBUG_TRAP:-}" ]]; then
-            eval "$DEFAULT_DEBUG_TRAP"
-        else
+        # Disarm a hook left behind when upgrading an already-running 1.1.x
+        # session. Fresh 1.2 sessions never touch DEBUG.
+        if [[ "$(trap -p DEBUG 2>/dev/null || true)" == *"_limon_preexec"* ]]; then
             trap '' DEBUG 2>/dev/null || true
         fi
         ;;
@@ -1840,6 +2083,8 @@ case "$SUBCOMMAND" in
         echo "Config: $LIMON_CONF"
         echo "Options: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
         echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK metrics=$LIMON_METRICS"
+        echo "Autosuggest: enabled=$LIMON_AUTOSUGGEST delay=${LIMON_AUTOSUGGEST_DELAY}ms color=$LIMON_AUTOSUGGEST_COLOR provider=${__LIMON_EDITOR_PROVIDER:-inactive}"
+        echo "Hooks: ${__LIMON_HOOK_PROVIDER:-none}; bash-completion=$(_limon_bash_completion_state)"
         if [[ "$LIMON_METRICS" == "1" && -n "${__LIMON_RENDER_US:-}" ]]; then
             echo "Last render: $(_limon_fmt_ms "$__LIMON_RENDER_US") (run 'limon bench' for an average)"
         elif [[ "$LIMON_METRICS" == "1" ]]; then
@@ -1904,9 +2149,10 @@ case "$SUBCOMMAND" in
     config)
         CONFIG_ARG="${1:-}"
         if [[ -z "$CONFIG_ARG" ]]; then
-            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|channel=stable|beta|dev|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1|show_exit=0|1|exit_hints=0|1|clock=0|1|metrics=0|1"
+            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|channel=stable|beta|dev|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1|show_exit=0|1|exit_hints=0|1|clock=0|1|metrics=0|1|autosuggest=0|1|autosuggest_delay=0..2000|autosuggest_color=auto|0..255"
             echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE channel=$LIMON_CHANNEL ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
             echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK metrics=$LIMON_METRICS"
+            echo "         autosuggest=$LIMON_AUTOSUGGEST autosuggest_delay=$LIMON_AUTOSUGGEST_DELAY autosuggest_color=$LIMON_AUTOSUGGEST_COLOR"
         else
             config_ok=0
             case "$CONFIG_ARG" in
@@ -1924,8 +2170,18 @@ case "$SUBCOMMAND" in
                         *) echo "limon: git must be full, lite, verbose, or off" >&2 ;;
                     esac
                     ;;
-                show_host=*) LIMON_SHOW_HOST="${CONFIG_ARG#*=}"; config_ok=1 ;;
-                show_ssh=*) LIMON_SHOW_SSH="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                show_host=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_SHOW_HOST="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: show_host must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
+                show_ssh=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_SHOW_SSH="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: show_ssh must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
                 autoupdate=*)
                     case "${CONFIG_ARG#*=}" in
                         off|notify|on) LIMON_AUTOUPDATE="${CONFIG_ARG#*=}"; config_ok=1 ;;
@@ -2019,6 +2275,33 @@ case "$SUBCOMMAND" in
                         *) echo "limon: metrics must be 0 or 1" >&2 ;;
                     esac
                     ;;
+                autosuggest=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_AUTOSUGGEST="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: autosuggest must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
+                autosuggest_delay=*)
+                    if [[ "${CONFIG_ARG#*=}" =~ ^[0-9]+$ ]] && (( ${CONFIG_ARG#*=} <= 2000 )); then
+                        LIMON_AUTOSUGGEST_DELAY="${CONFIG_ARG#*=}"
+                        config_ok=1
+                    else
+                        echo "limon: autosuggest_delay must be an integer from 0 to 2000 milliseconds" >&2
+                    fi
+                    ;;
+                autosuggest_color=*)
+                    case "${CONFIG_ARG#*=}" in
+                        auto) LIMON_AUTOSUGGEST_COLOR=auto; config_ok=1 ;;
+                        *)
+                            if [[ "${CONFIG_ARG#*=}" =~ ^[0-9]+$ ]] && (( ${CONFIG_ARG#*=} <= 255 )); then
+                                LIMON_AUTOSUGGEST_COLOR="${CONFIG_ARG#*=}"
+                                config_ok=1
+                            else
+                                echo "limon: autosuggest_color must be auto or 0-255" >&2
+                            fi
+                            ;;
+                    esac
+                    ;;
                 *)
                     echo "limon: unknown config option '$CONFIG_ARG'" >&2
                     echo "Usage: limon config ... host_color=auto|off|N env_banner=0|1 show_root=0|1 show_sudo=0|1 k8s=0|1 cloud=0|1" >&2
@@ -2031,7 +2314,12 @@ case "$SUBCOMMAND" in
                 # renderer runs in this shell via PROMPT_COMMAND, and subshells inherit
                 # shell variables anyway, so exporting them only pollutes the environment
                 # of every child process.
-                if _limon_is_active; then
+                if _limon_is_active && [[ "$CONFIG_ARG" == autosuggest* ]]; then
+                    # Re-run provider selection so autosuggestion changes take
+                    # effect immediately. A loaded bundled editor stays resident.
+                    # shellcheck source=limon.sh
+                    source "$SCRIPT_DIR/limon.sh" on "$saved_theme"
+                elif _limon_is_active; then
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
                           __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
@@ -2077,7 +2365,7 @@ Usage:
     limon themes         List available themes
     limon edit [theme]   Open theme in \$EDITOR (creates ~/.config/limon/themes/ copy)
     limon preview <theme> Show sample prompt without switching
-    limon config KEY=VAL Set timer, git, host, safety, and rendering options
+    limon config KEY=VAL Set timer, git, autosuggestion, safety, and rendering options
     limon colors         Show ANSI color codes
     limon version        Show the installed Limon version
     limon help           Show this help
@@ -2123,6 +2411,13 @@ Exit codes:
 
 Prompt extras:
     limon config clock=1            Show HH:MM before the command timer (default off)
+
+Ghost autosuggestions:
+    limon config autosuggest=1      Enable inline suggestions (default)
+    limon config autosuggest=0      Disable ghost suggestions
+    limon config autosuggest_delay=100  Delay in milliseconds (0-2000)
+    limon config autosuggest_color=245  Ghost text color (auto or 0-255)
+    Right/End accepts all; Ctrl+Right accepts one word; Tab completes normally
 
 Diagnostics:
     limon health                    Check bash, colors, git, theme, and prompt state
