@@ -20,10 +20,11 @@
 set -euo pipefail
 
 # --- Bash version gate ---
-# Limon itself needs bash 4.0+, so refuse to install under an older one rather
+# Limon itself needs bash 4.4+, so refuse to install under an older one rather
 # than wiring a prompt into the user's startup files that cannot run.
-if [[ -z "${BASH_VERSINFO[0]:-}" ]] || (( BASH_VERSINFO[0] < 4 )); then
-    echo "limon: requires bash 4.0 or newer (found ${BASH_VERSION:-unknown})." >&2
+if [[ -z "${BASH_VERSINFO[0]:-}" ]] || \
+   (( BASH_VERSINFO[0] < 4 || BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4 )); then
+    echo "limon: requires bash 4.4 or newer (found ${BASH_VERSION:-unknown})." >&2
     if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
         echo "limon: macOS ships bash 3.2 as /bin/bash. Try: brew install bash" >&2
         echo "limon: then re-run this installer with the newer bash." >&2
@@ -34,7 +35,7 @@ fi
 # --- Constants ---
 LIMON_BEGIN="# >>> limon >>>"
 LIMON_END="# <<< limon <<<"
-FILES=(limon.sh hint-limon.sh)
+FILES=(limon.sh hint-limon.sh THIRD_PARTY_NOTICES.md)
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/limon"
@@ -188,7 +189,7 @@ do_install() {
     else
         # No git metadata available: copy just the runtime files.
         # 'limon upgrade' will be unavailable; re-clone to enable it.
-        mkdir -p "$TARGET_DIR/themes"
+        mkdir -p "$TARGET_DIR/themes" "$TARGET_DIR/vendor"
         local f
         for f in "${FILES[@]}"; do
             cp -f "$SOURCE_DIR/$f" "$TARGET_DIR/$f"
@@ -196,6 +197,9 @@ do_install() {
         cp -f "$SOURCE_DIR/install.sh" "$TARGET_DIR/install.sh" 2>/dev/null || true
         if [[ -d "$SOURCE_DIR/themes" ]]; then
             cp -f "$SOURCE_DIR/themes/"*.theme "$TARGET_DIR/themes/" 2>/dev/null || true
+        fi
+        if [[ -d "$SOURCE_DIR/vendor" ]]; then
+            cp -a "$SOURCE_DIR/vendor/." "$TARGET_DIR/vendor/"
         fi
         echo "limon-install: copied runtime files (no .git found — 'limon upgrade' unavailable)"
         echo "limon-install: to update later, re-run the installer:"
@@ -212,14 +216,13 @@ do_install() {
     {
         printf '%s\n' "$LIMON_BEGIN"
         printf '%s\n' "# Added by the Limon installer. Remove with: $TARGET_DIR/install.sh --uninstall"
-        printf '%s\n' "export TERM=xterm-256color"
-        printf 'alias limon="source %s/limon.sh"\n' "$TARGET_DIR"
-        printf 'source %s/hint-limon.sh\n' "$TARGET_DIR"
+        printf 'alias limon=%q\n' "source \"$TARGET_DIR/limon.sh\""
+        printf 'source %q\n' "$TARGET_DIR/hint-limon.sh"
         # Enable the prompt by sourcing directly rather than through the alias:
         # bash does not expand aliases in non-interactive shells, so "limon on"
         # here fails in any context that reads this file without an interactive
         # shell. The alias above is still what the user types day to day.
-        printf 'source %s/limon.sh on\n' "$TARGET_DIR"
+        printf 'source %q on\n' "$TARGET_DIR/limon.sh"
         printf '%s\n' "$LIMON_END"
     } >> "$RC_FILE"
 

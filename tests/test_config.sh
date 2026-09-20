@@ -27,6 +27,9 @@ assert_eq "default" "$saved_theme"
 it "defaults git mode to full"
 assert_eq "full" "$LIMON_GIT_MODE"
 
+it "enables ghost autosuggestions by default"
+assert_eq "1:100:auto" "$LIMON_AUTOSUGGEST:$LIMON_AUTOSUGGEST_DELAY:$LIMON_AUTOSUGGEST_COLOR"
+
 it "emits no flags when every option is at its default"
 assert_eq "" "$(_limon_conf_flags)"
 
@@ -36,6 +39,8 @@ LIMON_GIT_MODE="verbose"
 LIMON_ASCII="1"
 LIMON_MAX_PATH="40"
 LIMON_HOST_COLOR="auto"
+LIMON_AUTOSUGGEST_DELAY="250"
+LIMON_AUTOSUGGEST_COLOR="244"
 mapfile -t flags < <(_limon_conf_flags)
 _limon_write_config "nord" "${flags[@]}"
 
@@ -55,6 +60,8 @@ it "round-trips max_path"
 assert_eq "40" "$LIMON_MAX_PATH"
 it "round-trips host_color"
 assert_eq "auto" "$LIMON_HOST_COLOR"
+it "round-trips autosuggestion settings"
+assert_eq "250:244" "$LIMON_AUTOSUGGEST_DELAY:$LIMON_AUTOSUGGEST_COLOR"
 
 it "resets options absent from the config back to defaults"
 _limon_write_config "default"
@@ -68,6 +75,9 @@ for pair in git=full git=lite git=verbose git=off \
             channel=stable channel=beta channel=dev \
             ascii=0 ascii=1 env_banner=1 show_root=1 show_sudo=0 \
             k8s=1 cloud=1 show_exit=1 exit_hints=1 clock=1 metrics=1 \
+            show_host=0 show_host=1 show_ssh=0 show_ssh=1 \
+            autosuggest=0 autosuggest=1 autosuggest_delay=0 autosuggest_delay=2000 \
+            autosuggest_color=auto autosuggest_color=245 \
             host_color=auto host_color=off host_color=120 \
             max_path=0 max_path=40; do
     it "accepts '$pair'"
@@ -77,7 +87,9 @@ done
 
 for pair in git=bogus autoupdate=maybe channel=nightly ascii=2 \
             max_path=-1 max_path=abc host_color=999 host_color=purple \
-            env_banner=2 show_root=yes metrics=on; do
+            env_banner=2 show_root=yes show_host=yes show_ssh=2 metrics=on \
+            autosuggest=yes autosuggest_delay=-1 autosuggest_delay=2001 \
+            autosuggest_color=purple autosuggest_color=256; do
     it "rejects '$pair'"
     out="$(limon_cmd config "$pair")"
     assert_contains "$out" "limon:"

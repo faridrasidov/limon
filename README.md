@@ -1,10 +1,10 @@
-# 🍋 Limon — Fast Bash Prompt with Git Status, Themes & Timer (Pure Bash, No Nerd Font)
+# 🍋 Limon — Fast Bash Prompt with Ghost Autosuggestions, Git Status, Themes & Timer
 
-**Limon is a fast, lightweight Bash prompt** for Linux, macOS, WSL, and Git Bash on Windows. It instantly upgrades your terminal prompt (PS1) with beautiful 256-colors, Git branch status, an execution timer, and helpful indicators — using **pure Bash** with no Python, Node.js, or external dependencies.
+**Limon is a fast, lightweight Bash prompt and interactive editor layer** for Linux, macOS, WSL, and Git Bash on Windows. It adds fish/Zsh-style ghost autosuggestions, 256-color themes, Git status, an execution timer, and useful indicators using Bash scripts only. There is no Python, Node.js, compiled binary, or per-architecture download.
 
-Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? Hate having to install special "patched" Nerd Fonts just to see a Git branch in your prompt? Limon is built differently. It uses built-in Bash features to deliver a beautiful, informative, and **zero-delay** custom bash prompt experience — perfect for customizing your `.bashrc` / `bashrc` prompt on any system.
+Tired of slow shell prompts that rely on language runtimes or heavy frameworks? Hate having to install special "patched" Nerd Fonts just to see a Git branch in your prompt? Limon ships its pure-Bash editor engine and keeps prompt rendering small and measurable.
 
-**Works on:** Linux · macOS · WSL (Windows Subsystem for Linux) · Git Bash on Windows. **Requires:** Bash 4.0 or newer (Git optional, for the git branch indicator).
+**Works on:** Linux · macOS · WSL (Windows Subsystem for Linux) · Git Bash on Windows. **Requires:** Bash 4.4 or newer and a UTF-8 terminal (Git optional, for the git branch indicator).
 
 > **macOS note:** Apple still ships Bash 3.2 as `/bin/bash`. Install a current one with `brew install bash` and use that shell — Limon checks the version at startup and tells you if it's too old rather than failing cryptically.
 
@@ -15,6 +15,7 @@ Tired of slow shell prompts that rely on Python, Node.js, or heavy frameworks? H
 ## ✨ Features of this Fast Bash Prompt
 
 * ⚡ **Blazing Fast:** Written purely in Bash. No Python interpreters or heavy background processes slowing down your Enter key — a truly lightweight, fast terminal prompt.
+* 👻 **Ghost Autosuggestions:** History, commands, paths, aliases, functions, builtins, and loaded Bash programmable completions appear inline as you type. Right Arrow or End accepts the suggestion; Ctrl+Right accepts one word.
 * 🔤 **No Patched Fonts Required:** Uses standard, universal Unicode symbols. It looks perfect out-of-the-box on any OS or font.
 * 🎨 **256-Color Modular Themes:** Choose from 11 built-in themes (Limon, Dracula, Nord, Neon, and more) or easily create your own with the built-in color picker.
 * ⏱️ **Smart Execution Timer:** Automatically displays how long a command took to run, with sub-second precision (`1.4s`, `2m 05s`, `1h 02m 05s`). Only appears past a threshold you set — 2 seconds by default, and `limon config timer_threshold=0.5` accepts fractions.
@@ -49,10 +50,10 @@ Useful options — pass them after `bash -s --`:
 curl -fsSL https://raw.githubusercontent.com/faridrasidov/limon/master/get-limon.sh | sudo bash -s -- --system
 
 # Install a specific release
-curl -fsSL https://raw.githubusercontent.com/faridrasidov/limon/master/get-limon.sh | bash -s -- --version 1.1.0
+curl -fsSL https://raw.githubusercontent.com/faridrasidov/limon/master/get-limon.sh | bash -s -- --version 1.2.0
 ```
 
-> **Requires Bash 4.0 or newer.** macOS still ships Bash 3.2 as `/bin/bash`;
+> **Requires Bash 4.4 or newer.** macOS still ships Bash 3.2 as `/bin/bash`;
 > install a current one with `brew install bash` and use that shell. The
 > installer checks this first and tells you if your Bash is too old, rather
 > than half-installing something that cannot run.
@@ -98,7 +99,6 @@ Prefer to wire it up by hand? The steps the installer automates are:
 git clone https://github.com/faridrasidov/limon
 sudo mv limon/ /usr/share/
 
-echo 'export TERM=xterm-256color' | sudo tee -a /etc/bash.bashrc
 echo 'alias limon="source /usr/share/limon/limon.sh"' | sudo tee -a /etc/bash.bashrc
 echo 'source /usr/share/limon/hint-limon.sh' | sudo tee -a /etc/bash.bashrc
 ```
@@ -119,20 +119,21 @@ source /etc/bash.bashrc
 
 ---
 
-## ⬆️ Upgrading from 1.0.0
+## ⬆️ Upgrading to 1.2.0
 
-Nothing to migrate — your config file and any themes you wrote keep working as
-they are. Run `limon upgrade`, or re-run the one-line installer.
+Your config file and themes keep working. Run `limon upgrade`, or re-run the
+one-line installer. Autosuggestions are enabled by default; disable them with
+`limon config autosuggest=0`.
 
 Two things to know before you do, both covered in full in
 [CHANGELOG.md](CHANGELOG.md):
 
-- **Bash 4.0+ is now required and enforced.** If you are on macOS's stock
+- **Bash 4.4+ is now required and enforced.** If you are on macOS's stock
   `/bin/bash` (3.2), Limon will refuse to start and tell you how to fix it.
   It never really worked there — it installed the prompt but silently failed to
   save your settings.
-- **The command timer now shows fractions** (`1.4s` instead of `1s`), and
-  `limon config timer_threshold=` accepts decimals like `0.5`.
+- Limon now bundles ble.sh, adding about 2.3 MB to the install but no compiled
+  binaries or architecture-specific packages.
 
 ---
 
@@ -205,8 +206,22 @@ limon config max_path=40 # Truncate long paths (e.g. ~/…/project/src)
 limon config env_banner=1 # Show PROD/STAGING banner when LIMON_ENV is set
 limon config cloud=1    # Show AWS_PROFILE in the prompt
 limon config k8s=1      # Show kubectl context (cached 2s)
+limon config autosuggest=0 # Disable ghost autosuggestions (enabled by default)
+limon config autosuggest_delay=150 # Delay before suggestions, in ms (0-2000)
+limon config autosuggest_color=245 # Ghost text color: auto or 0-255
 export LIMON_ENV=prod   # Label this shell as production (use with env_banner=1)
 ```
+
+Ghost suggestions use command history first, then Bash's completion machinery
+for commands, paths, aliases, functions, builtins, and command-specific
+arguments. If your distribution provides `bash-completion`, load it normally in
+`.bashrc`; Limon reuses those recipes instead of shipping a second copy.
+
+Right Arrow or End accepts the whole suggestion. Ctrl+Right accepts one word.
+Tab keeps its normal completion behavior. `limon off` removes Limon's prompt,
+timer hooks, and editor features; an editor that you loaded yourself is left
+attached with its previous configuration. A bundled ble.sh runtime already
+loaded in the current Bash process stays resident but inert until the shell exits.
 
 Colors automatically disable when `TERM=dumb` or output is not a TTY (safe for logs and `script`).
 
@@ -440,7 +455,7 @@ If you've looked at customizing your shell prompt before, you've probably seen t
 * Require an external binary or interpreter (Rust, Go, Python, Node.js) to be installed and invoked on every prompt.
 * Often expect you to install **Nerd Fonts** to render their custom glyphs and icons.
 
-**Limon is a lightweight, pure-Bash alternative.** It has zero external dependencies (beyond optional Git), uses only universal Unicode symbols, and adds no measurable delay when you press `Enter`. If you want a fast bash prompt with git status and themes without installing a separate runtime or patched fonts, Limon is for you.
+**Limon is a lightweight, Bash-native alternative.** It bundles the pure-Bash ble.sh line editor, uses ordinary Unicode symbols, and needs no separate runtime or patched font. Optional Git powers repository status; optional system `bash-completion` adds richer command-specific suggestions.
 
 ---
 
@@ -462,7 +477,7 @@ No. Limon uses only standard, universal Unicode symbols and 256-color ANSI codes
 Add `limon on` to your `~/.bashrc` (or `/etc/bash.bashrc` for all users). Limon sets `PS1` for you and remembers your last theme. You can further customize the prompt with simple `.theme` files — see [Custom Bash Prompt Themes](#-custom-bash-prompt-themes--customization).
 
 **Does Limon work on Windows (WSL / Git Bash)?**
-Yes. Limon runs on Linux, macOS, WSL (Windows Subsystem for Linux), and Git Bash on Windows. There's even a built-in `git_bash` theme tuned for the Git Bash terminal.
+Yes. Limon runs on Linux, macOS, WSL (Windows Subsystem for Linux), and Git Bash on Windows. There's even a built-in `git_bash` theme tuned for the Git Bash terminal. The editor is pure Bash, so there is no Windows-specific executable.
 
 **How do I show command execution time in the prompt?**
 Limon includes a built-in execution timer that automatically shows how long a command took (by default only when it runs longer than 2 seconds). Adjust it with `limon config timer_threshold=N`.
@@ -496,7 +511,7 @@ Linting uses [ShellCheck](https://www.shellcheck.net/):
 shellcheck -S warning limon.sh install.sh hint-limon.sh tests/*.sh
 ```
 
-Both run automatically in CI on every push and pull request, across Bash 4.4, 5.0, and 5.2.
+Both run automatically in CI on every push and pull request, across Bash 4.4, 5.0, 5.2, and 5.3. CI also uses a real pseudo-terminal to accept a rendered ghost suggestion.
 
 To load Limon's functions without installing the prompt (useful when writing tests):
 
@@ -518,6 +533,10 @@ To help others discover this project, the repository uses topics such as:
 Limon is free software, licensed under the **GNU General Public License v3.0 or later** (GPL-3.0-or-later).
 
 You are free to use, modify, and distribute this project under the terms of the GPL. See the [LICENSE](LICENSE) file for the full license text.
+
+The bundled ble.sh runtime is BSD-3-Clause licensed. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
+[`vendor/blesh/LICENSE.md`](vendor/blesh/LICENSE.md).
 
 ---
 

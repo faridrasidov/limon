@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Version tag to release, e.g. v1.1.0 (created if it does not exist yet)"
+        description: "Version tag to release, e.g. v1.2.0 (created if it does not exist yet)"
         required: true
 
 permissions:
@@ -89,8 +89,9 @@ jobs:
 
           # Runtime payload only — no tests, no CI config, no screenshot.
           cp limon.sh hint-limon.sh install.sh get-limon.sh \
-             README.md CHANGELOG.md LICENSE "$stage/"
+             README.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$stage/"
           cp -r themes "$stage/themes"
+          cp -r vendor "$stage/vendor"
 
           ( cd dist && tar -czf "limon-${VERSION}.tar.gz" "limon-${VERSION}" )
           ( cd dist && zip -qr "limon-${VERSION}.zip" "limon-${VERSION}" )
@@ -114,6 +115,7 @@ jobs:
           HOME="$home" XDG_DATA_HOME="$home/.local/share" \
             bash "$work/limon-${VERSION}/install.sh" --user -y
           test -f "$home/.local/share/limon/limon.sh"
+          test -f "$home/.local/share/limon/vendor/blesh/ble.sh"
           grep -q 'limon on' "$home/.bashrc"
           echo "Archive installs cleanly."
 

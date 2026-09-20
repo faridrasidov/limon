@@ -25,14 +25,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Limon's floor is bash 4.0 (it uses mapfile and ${var^^}). The 4.4 leg
-        # is the oldest version still widely shipped; 5.2 is current.
-        bash: ["4.4", "5.0", "5.2"]
+        # Bash 4.4 is Limon's floor because native command timing uses PS0.
+        bash: ["4.4", "5.0", "5.2", "5.3"]
     container: bash:${{ matrix.bash }}
     steps:
       - name: Install test dependencies
         # The bash:* images are Alpine-based and ship neither git nor coreutils.
-        run: apk add --no-cache git grep coreutils
+        run: apk add --no-cache bash-completion expect git grep coreutils
 
       - uses: actions/checkout@v4
 

@@ -1,0 +1,42 @@
+#!/usr/bin/expect -f
+
+set timeout 20
+set limon [lindex $argv 0]
+set home $env(HOME)
+
+set history [open "$home/.bash_history" w]
+puts $history "echo LIMON_GHOST_OK"
+close $history
+
+spawn env HOME=$home XDG_CONFIG_HOME=$env(XDG_CONFIG_HOME) TERM=xterm-256color bash --noprofile --norc -i
+send -- "source \"$limon\" on default; echo LIMON_PTY_READY\r"
+expect {
+    "LIMON_PTY_READY" {}
+    timeout { exit 1 }
+    eof { exit 1 }
+}
+
+# Type only a unique prefix, wait past the default 100ms delay, accept the
+# ghost text with Right Arrow, then execute the completed command.
+send -- "echo LIMON_GH"
+after 600
+send -- "\033\[C"
+send -- "\r"
+expect {
+    -re "\r\nLIMON_GHOST_OK\r\n" {}
+    timeout { exit 1 }
+    eof { exit 1 }
+}
+
+send -- "source \"$limon\" off\r"
+after 300
+send -- "printf 'LIMON_OFF_OK:%s:%s\\n' \"\${__LIMON_ACTIVE:-0}\" \"\${bleopt_complete_auto_complete:-disabled}\"\r"
+expect {
+    "LIMON_OFF_OK:0:disabled" {}
+    timeout { exit 1 }
+    eof { exit 1 }
+}
+
+send -- "exit\r"
+expect eof
+exit 0

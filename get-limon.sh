@@ -36,8 +36,9 @@ API_URL="${LIMON_API_URL:-https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME
 # --- Bash version gate -------------------------------------------------------
 # Matches the check in limon.sh and install.sh. Fail here rather than download
 # anything we already know will not run.
-if [[ -z "${BASH_VERSINFO[0]:-}" ]] || (( BASH_VERSINFO[0] < 4 )); then
-    echo "limon: requires bash 4.0 or newer (found ${BASH_VERSION:-unknown})." >&2
+if [[ -z "${BASH_VERSINFO[0]:-}" ]] || \
+   (( BASH_VERSINFO[0] < 4 || BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4 )); then
+    echo "limon: requires bash 4.4 or newer (found ${BASH_VERSION:-unknown})." >&2
     if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
         echo "limon: macOS ships bash 3.2 as /bin/bash. Install a newer one with:" >&2
         echo "limon:   brew install bash" >&2
@@ -137,7 +138,7 @@ have_downloader() {
     command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1
 }
 
-# Resolve the tag of the newest published release, e.g. "v1.1.0".
+# Resolve the tag of the newest published release, e.g. "v1.2.0".
 latest_tag() {
     fetch_stdout "${API_URL}/releases/latest" \
         | grep -m1 '"tag_name"' \

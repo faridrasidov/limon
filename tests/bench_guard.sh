@@ -12,6 +12,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# shellcheck disable=SC2034
+
 set -uo pipefail
 
 TESTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
