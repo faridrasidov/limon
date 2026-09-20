@@ -794,14 +794,25 @@ _limon_threshold_ms() {
 }
 
 # Sets __LIMON_ELAPSED_STR to a human-readable duration for "$1" milliseconds.
+#
 # Under a minute it keeps one decimal place ("1.4s"); above that it switches to
 # whole seconds ("2m 03s"), where tenths stop being useful.
+#
+# "$2" says whether the measurement actually has sub-second resolution (default
+# yes). On bash 4 there is no fork-free high-resolution clock, so the timer
+# falls back to whole seconds — printing "1.0s" there would advertise a
+# precision the number does not have, so it renders "1s" instead.
 _limon_format_elapsed() {
     local ms="$1"
+    local hires="${2:-1}"
     (( ms < 0 )) && ms=0
 
     if (( ms < 60000 )); then
-        __LIMON_ELAPSED_STR="$(( ms / 1000 )).$(( (ms % 1000) / 100 ))s"
+        if [[ "$hires" == "1" ]]; then
+            __LIMON_ELAPSED_STR="$(( ms / 1000 )).$(( (ms % 1000) / 100 ))s"
+        else
+            __LIMON_ELAPSED_STR="$(( ms / 1000 ))s"
+        fi
         return
     fi
 
@@ -1238,7 +1249,7 @@ _limon_restore_session() {
     PROMPT_COMMAND="${DEFAULT_PROMPT_COMMAND:-}"
     unset timer LAST_EXIT_CODE 2>/dev/null || true
     unset __LIMON_CMD_START __LIMON_CMD_START_US __LIMON_CMD_ELAPSED \
-          __LIMON_CMD_ELAPSED_MS __LIMON_CMD_ACTIVE __LIMON_IN_PROMPT \
+          __LIMON_CMD_ELAPSED_MS __LIMON_TIMER_HIRES __LIMON_CMD_ACTIVE __LIMON_IN_PROMPT \
           __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
           __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
@@ -1577,7 +1588,7 @@ _limon_main() {
     local elapsed_str=""
     _limon_threshold_ms
     if (( ${__LIMON_CMD_ELAPSED_MS:-0} >= __LIMON_THRESHOLD_MS )); then
-        _limon_format_elapsed "${__LIMON_CMD_ELAPSED_MS:-0}"
+        _limon_format_elapsed "${__LIMON_CMD_ELAPSED_MS:-0}" "${__LIMON_TIMER_HIRES:-1}"
         elapsed_str=" $__LIMON_ELAPSED_STR"
     fi
 
@@ -1701,13 +1712,16 @@ limon_runner() {
             _limon_clock_us
             __LIMON_CMD_ELAPSED_MS=$(( (__LIMON_T - __LIMON_CMD_START_US) / 1000 ))
             (( __LIMON_CMD_ELAPSED_MS < 0 )) && __LIMON_CMD_ELAPSED_MS=0
+            __LIMON_TIMER_HIRES=1
         else
             __LIMON_CMD_ELAPSED_MS=$(( __LIMON_CMD_ELAPSED * 1000 ))
+            __LIMON_TIMER_HIRES=0
         fi
     else
         __LIMON_CMD_ELAPSED=0
         __LIMON_CMD_ELAPSED_MS=0
     fi
+    : "${__LIMON_TIMER_HIRES:=1}"
     __LIMON_CMD_ACTIVE=0
     if [[ "${LIMON_METRICS:-0}" == "1" ]]; then
         local __limon_a __limon_b

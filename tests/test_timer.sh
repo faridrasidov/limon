@@ -11,7 +11,17 @@ source "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/helpers.sh"
 use_temp_home
 load_limon
 
-fmt() { _limon_format_elapsed "$1"; printf '%s' "$__LIMON_ELAPSED_STR"; }
+fmt() { _limon_format_elapsed "$1" "${2:-1}"; printf '%s' "$__LIMON_ELAPSED_STR"; }
+
+# Sub-second timing needs a fork-free high-resolution clock. Bash 4 has none,
+# and running `date` before every command would cost more than the extra
+# precision is worth, so those shells keep whole-second timing. Tests that
+# assert tenths have to be gated on that.
+if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    HIRES=1
+else
+    HIRES=0
+fi
 
 thr() {
     LIMON_TIMER_THRESHOLD="$1"
@@ -48,6 +58,20 @@ assert_eq "1h 02m 05s" "$(fmt 3725000)"
 
 it "treats a negative duration as zero"
 assert_eq "0.0s" "$(fmt -5)"
+
+# --- whole-second formatting (the bash 4 fallback path) ---
+#
+# Printing "1.0s" when the measurement only has whole-second resolution would
+# advertise a precision the number does not have.
+
+it "drops the decimal when resolution is whole seconds"
+assert_eq "1s" "$(fmt 1000 0)"
+
+it "does not invent tenths from a whole-second measurement"
+assert_eq "0s" "$(fmt 0 0)"
+
+it "still uses the minutes form without hi-res resolution"
+assert_eq "2m 05s" "$(fmt 125000 0)"
 
 # --- threshold parsing ---
 
@@ -91,33 +115,51 @@ done
 
 # --- end to end ---
 
-it "measures a real command with sub-second resolution"
-out="$(env HOME="$HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" TERM=xterm-256color bash -c "
-    source '$LIMON_REPO_ROOT/limon.sh' on default >/dev/null 2>&1
-    LIMON_TIMER_THRESHOLD=0.2
-    _limon_preexec 2>/dev/null
-    sleep 0.6
-    limon_runner
-    echo \"ms=\$__LIMON_CMD_ELAPSED_MS\"
-")"
-ms="${out##*ms=}"
-ms="${ms%%$'\n'*}"
-if [[ "$ms" =~ ^[0-9]+$ ]] && (( ms >= 500 && ms <= 2000 )); then
-    _limon_t_ok
+# time_a_command <extra-setup> — runs `sleep 0.6` under the real preexec/runner
+# pair and echoes the measured milliseconds and the resulting PS1.
+time_a_command() {
+    env HOME="$HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" TERM=xterm-256color bash -c "
+        ${1:-}
+        source '$LIMON_REPO_ROOT/limon.sh' on default >/dev/null 2>&1
+        LIMON_TIMER_THRESHOLD=0.2
+        _limon_preexec 2>/dev/null
+        sleep 0.6
+        limon_runner
+        echo \"ms=\$__LIMON_CMD_ELAPSED_MS hires=\$__LIMON_TIMER_HIRES ps1=\$PS1\"
+    "
+}
+
+if (( HIRES )); then
+    it "measures a real command with sub-second resolution"
+    out="$(time_a_command)"
+    ms="${out##*ms=}"; ms="${ms%% *}"
+    if [[ "$ms" =~ ^[0-9]+$ ]] && (( ms >= 500 && ms <= 2000 )); then
+        _limon_t_ok
+    else
+        _limon_t_not_ok "expected roughly 600ms for 'sleep 0.6', got: [$ms]" "full: $out"
+    fi
+
+    it "shows the fractional duration in the prompt"
+    assert_contains "$(time_a_command)" "0.6s"
+
+    it "reports the measurement as high-resolution"
+    assert_contains "$(time_a_command)" "hires=1"
 else
-    _limon_t_not_ok "expected roughly 600ms for 'sleep 0.6', got: [$ms]"
+    it "skips sub-second assertions without a high-resolution clock"
+    _limon_t_ok
 fi
 
-it "shows the fractional duration in the prompt"
-out="$(env HOME="$HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" TERM=xterm-256color bash -c "
-    source '$LIMON_REPO_ROOT/limon.sh' on default >/dev/null 2>&1
-    LIMON_TIMER_THRESHOLD=0.2
-    _limon_preexec 2>/dev/null
-    sleep 0.6
-    limon_runner
-    echo \"\$PS1\"
-")"
-assert_contains "$out" "0.6s"
+# The whole-second fallback must work on every bash, so exercise it here even
+# when a high-resolution clock is available, by taking EPOCHREALTIME away.
+it "falls back to whole-second timing with no high-resolution clock"
+assert_contains "$(time_a_command 'unset EPOCHREALTIME')" "hires=0"
+
+it "shows no misleading decimal on the whole-second path"
+out="$(time_a_command 'unset EPOCHREALTIME')"
+ps1="${out##*ps1=}"
+# Whole-second timing reports either 0s (command did not cross a second
+# boundary, so no timer at all) or "1s" — never "1.0s".
+assert_not_contains "$ps1" ".0s"
 
 it "shows no timer for a command under the threshold"
 out="$(env HOME="$HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" TERM=xterm-256color bash -c "
@@ -127,6 +169,12 @@ out="$(env HOME="$HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" TERM=xterm-256color b
     limon_runner
     echo \"\$PS1\"
 ")"
-assert_not_contains "$out" "s "
+# Match the timer's actual shape (a digit followed by "s") rather than the
+# bare substring "s ", which a branch or directory name could contain.
+if [[ "$out" =~ [0-9]s ]]; then
+    _limon_t_not_ok "expected no timer below the threshold" "PS1: [$out]"
+else
+    _limon_t_ok
+fi
 
 finish
