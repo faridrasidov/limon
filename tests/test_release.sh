@@ -166,6 +166,36 @@ assert_contains "$(cat "$WORKFLOW")" "Verify the archive installs"
 it "the release workflow packages the vendored editor"
 assert_contains "$(cat "$WORKFLOW")" 'cp -r vendor'
 
+it "the release workflow checks the rc line install.sh actually writes"
+# These two encode the same fact in two files. They drifted once already: the
+# workflow grepped for 'limon on' while install.sh had switched to
+# "source <dir>/limon.sh on", which would have failed the next release.
+rc_pattern="$(grep -oE "grep -qE '\^source [^']*'" "$WORKFLOW" | head -1)"
+if [[ -n "$rc_pattern" ]]; then
+    _limon_t_ok
+else
+    _limon_t_not_ok "release.yml must assert the startup line with an anchored pattern"
+fi
+
+it "the workflow's rc pattern matches a real install"
+# Build the rc file the way the release job does, then apply the workflow's own
+# assertions to it.
+sandbox="$(mktemp -d)"
+env HOME="$sandbox" XDG_DATA_HOME="$sandbox/.local/share" \
+    XDG_CONFIG_HOME="$sandbox/.config" \
+    bash "$LIMON_REPO_ROOT/install.sh" --user -y >/dev/null 2>&1
+if grep -q '^# >>> limon >>>' "$sandbox/.bashrc" &&
+   grep -qE '^source .*/limon\.sh on$' "$sandbox/.bashrc"; then
+    _limon_t_ok
+else
+    _limon_t_not_ok "release.yml's rc assertions do not match what install.sh writes" \
+                    "rc file: $(grep -c . "$sandbox/.bashrc" 2>/dev/null || echo 0) lines"
+fi
+rm -rf "$sandbox"
+
+it "the release workflow no longer greps the loose 'limon on' substring"
+assert_not_contains "$(cat "$WORKFLOW")" "grep -q 'limon on'"
+
 it "the release workflow runs the test suite"
 assert_contains "$(cat "$WORKFLOW")" "bash tests/run.sh"
 

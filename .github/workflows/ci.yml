@@ -33,6 +33,17 @@ jobs:
         # The bash:* images are Alpine-based and ship neither git nor coreutils.
         run: apk add --no-cache bash-completion expect git grep coreutils
 
+      - name: Verify the PTY test can actually run
+        # tests/test_autosuggest_pty.sh skips when expect is missing, and CI is
+        # the only place it runs at all. Fail loudly here rather than let the
+        # one real test for autosuggestions quietly stop running.
+        run: |
+          command -v expect >/dev/null 2>&1 || {
+            echo "::error::expect is missing; the autosuggestion PTY test would silently skip" >&2
+            exit 1
+          }
+          expect -v
+
       - uses: actions/checkout@v4
 
       - name: Mark checkout as a safe git directory

@@ -8,8 +8,7 @@ use_temp_home
 
 it "renders and accepts a history ghost suggestion in an interactive terminal"
 if ! command -v expect >/dev/null 2>&1; then
-    _limon_t_ok
-    echo "       skipped: expect is not installed"
+    skip "expect is not installed — install it to run this test locally (CI always runs it)"
 else
     if HOME="$HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" \
         expect "$LIMON_TEST_DIR/autosuggest.exp" "$LIMON_REPO_ROOT/limon.sh"; then
