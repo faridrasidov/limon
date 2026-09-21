@@ -14,7 +14,7 @@
 # limon - Optimized Bash Prompt
 # Features: 256-Color ANSI Support, Color Picker, Silent Default, Modular Themes
 
-LIMON_VERSION="1.2.0"
+LIMON_VERSION="1.2.1"
 
 # --- 0. Bash version gate ---
 #
