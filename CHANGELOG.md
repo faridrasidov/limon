@@ -9,6 +9,15 @@ The format follows a simple, release-oriented structure:
 - `Fixed` for bug fixes.
 - `Docs` for documentation-only changes.
 
+## 1.2.1 - 2026-09-21
+
+### Fixed
+
+- Alt+Backspace deletes the previous path component or word again. The bundled
+  ble.sh bound it to `copy-backward-sword`, which copied instead of deleting
+  and ignored `/`; Limon now binds it to `kill-backward-cword` in its own
+  ble.sh instance only (#11).
+
 ## 1.2.0 - 2026-09-20
 
 ### Upgrade notes

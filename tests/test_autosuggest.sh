@@ -49,6 +49,11 @@ blehook() {
     FAKE_HOOKS+=" $*"
 }
 
+FAKE_BINDS=""
+ble-bind() {
+    FAKE_BINDS+="|$*"
+}
+
 ble-face() {
     if [[ "${1:-}" == "--color=never" ]]; then
         echo "ble-face auto_complete=$FAKE_FACE"
@@ -80,8 +85,17 @@ it "restores an existing ble.sh configuration on detach"
 assert_eq "old-auto:321:old-syntax:fg=238,bg=254" \
     "$bleopt_complete_auto_complete:$bleopt_complete_auto_delay:$bleopt_highlight_syntax:$FAKE_FACE"
 
+it "does not rebind keys in a user-owned ble.sh"
+assert_eq "" "$FAKE_BINDS"
+
 __LIMON_BLE_OWNED=1
 _limon_ble_configure
+
+it "binds Alt+Backspace to kill-backward-cword in the bundled editor"
+assert_contains "$FAKE_BINDS" "-m emacs -f M-DEL kill-backward-cword"
+assert_contains "$FAKE_BINDS" "-m emacs -f M-BS kill-backward-cword"
+assert_contains "$FAKE_BINDS" "-m vi_imap -f M-DEL kill-backward-cword"
+
 _limon_ble_restore
 
 it "leaves a bundled editor resident but inert when Limon turns off"
