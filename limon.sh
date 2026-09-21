@@ -14,7 +14,7 @@
 # limon - Optimized Bash Prompt
 # Features: 256-Color ANSI Support, Color Picker, Silent Default, Modular Themes
 
-LIMON_VERSION="1.2.0"
+LIMON_VERSION="1.2.1"
 
 # --- 0. Bash version gate ---
 #
@@ -364,6 +364,19 @@ _limon_ble_configure() {
         ble-face "auto_complete=fg=$color" >/dev/null 2>&1 || true
     else
         bleopt complete_auto_complete= >/dev/null 2>&1 || true
+    fi
+
+    # ble.sh binds Alt+Backspace to copy-backward-sword, which copies instead
+    # of deleting and ignores "/" as a delimiter. Restore readline's
+    # backward-kill-word behaviour, but only in Limon's private instance so a
+    # user's own ble.sh bindings are never touched.
+    if [[ "${__LIMON_BLE_OWNED:-0}" == "1" ]] && command -v ble-bind >/dev/null 2>&1; then
+        local key keymap
+        for keymap in emacs vi_imap; do
+            for key in 'M-DEL' 'M-BS' 'M-C-?' 'M-C-h'; do
+                ble-bind -m "$keymap" -f "$key" kill-backward-cword >/dev/null 2>&1 || true
+            done
+        done
     fi
 
     blehook PREEXEC!=_limon_preexec
