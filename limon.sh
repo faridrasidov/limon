@@ -1157,7 +1157,10 @@ _limon_do_bench() {
         printf '  shell RSS:   %d KB (~%d MB, whole bash process)\n' "$rss" $(( rss / 1024 ))
     fi
 
-    if [[ "${LIMON_GIT_MODE:-full}" != "off" ]]; then
+    # The git fork only happens inside an actual repository (outside one,
+    # _limon_git_has_repo_marker skips it in pure bash), so the tip is only
+    # true, and only worth printing, when this benchmark ran inside a repo.
+    if [[ "${LIMON_GIT_MODE:-full}" != "off" && "${__LIMON_GIT_IN_REPO:-0}" == "1" ]]; then
         echo "  tip: most cost is the git status call; 'limon config git=lite' or 'git=off' is faster."
     fi
 }

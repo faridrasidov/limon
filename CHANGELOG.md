@@ -21,6 +21,9 @@ The format follows a simple, release-oriented structure:
   small or loaded machines, so this removes the single biggest cost of
   `limon config git=full` (the default) for the common case of sitting outside
   a repo.
+- `limon bench`'s "most cost is the git status call" tip now only prints when
+  the benchmark actually ran inside a repository, since that fork no longer
+  happens, and dominates nothing, outside one.
 
 ## 1.2.1 - 2026-09-21
 
