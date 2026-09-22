@@ -17,8 +17,9 @@ mkdir -p "$WORK"
 # that, so clear the cache before each scenario.
 reset_git_cache() {
     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
-          __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
-          __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE __LIMON_STASH_CACHE_SEC
+          __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_IN_REPO __LIMON_GIT_CACHE_BRANCH \
+          __LIMON_GIT_CACHE_MARKS __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE \
+          __LIMON_STASH_CACHE_SEC
 }
 
 # scan <dir> [git_mode] — run the parser in <dir> and leave results in globals.
@@ -35,10 +36,45 @@ it "reports not-in-repo outside a git repository"
 scan "$HOME"
 assert_eq "0" "$__LIMON_GIT_IN_REPO"
 
+# _limon_git_has_repo_marker lets _limon_git_info skip forking "git status"
+# entirely outside a repo. Prove that with a stub "git" that fails loudly if
+# called, so a regression here (e.g. losing the fast path) fails the suite
+# instead of just costing a fork silently.
+cd "$HOME" || exit 1
+reset_git_cache
+git() { echo "GIT WAS CALLED: $*" >&2; return 1; }
+stub_log="$HOME/git-stub.log"
+: > "$stub_log"
+_limon_git_info 2>>"$stub_log"
+it "never forks git outside a repository"
+assert_eq "0" "$__LIMON_GIT_IN_REPO"
+assert_eq "" "$(cat "$stub_log")"
+# Cache is per-PWD, not per-second here, so a second call in the same
+# directory must also skip the fork.
+_limon_git_info 2>>"$stub_log"
+it "does not fork git on a second call in the same non-repo directory"
+assert_eq "" "$(cat "$stub_log")"
+unset -f git
+
+
 # --- clean repo ---
 
 make_repo "$WORK/clean"
 scan "$WORK/clean"
+
+cd "$WORK/clean" || exit 1
+reset_git_cache
+# _limon_git_info forks git through a process substitution, which runs in a
+# subshell — a variable set inside the stub would not survive back to this
+# shell, so mark the call with a file instead.
+call_log="$HOME/git-called.log"
+rm -f "$call_log"
+git() { : > "$call_log"; command git "$@"; }
+_limon_git_info
+it "still forks git (and finds the branch) inside a repository"
+assert_eq "1" "$__LIMON_GIT_IN_REPO"
+assert_ok test -e "$call_log"
+unset -f git
 
 it "detects being inside a repo"
 assert_eq "1" "$__LIMON_GIT_IN_REPO"

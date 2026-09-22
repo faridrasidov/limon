@@ -9,6 +9,19 @@ The format follows a simple, release-oriented structure:
 - `Fixed` for bug fixes.
 - `Docs` for documentation-only changes.
 
+## 1.2.2 - 2026-09-22
+
+### Changed
+
+- The git segment no longer forks `git` at all in a directory that is not a
+  repository (a home directory, `/tmp`, ...). It now checks for a `.git` entry
+  by walking up from `$PWD` in pure bash before deciding whether to fork, and
+  caches that "no repo here" result the same way it already cached a
+  repo's branch and status. Process-spawn cost dominates prompt render time on
+  small or loaded machines, so this removes the single biggest cost of
+  `limon config git=full` (the default) for the common case of sitting outside
+  a repo.
+
 ## 1.2.1 - 2026-09-21
 
 ### Fixed

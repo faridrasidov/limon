@@ -14,7 +14,7 @@
 # limon - Optimized Bash Prompt
 # Features: 256-Color ANSI Support, Color Picker, Silent Default, Modular Themes
 
-LIMON_VERSION="1.2.1"
+LIMON_VERSION="1.2.2"
 
 # --- 0. Bash version gate ---
 #
@@ -1410,8 +1410,9 @@ _limon_do_edit() {
 
     if _limon_is_active && [[ "$saved_theme" == "$theme_name" ]]; then
         unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
-              __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
-              __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
+              __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_IN_REPO __LIMON_GIT_CACHE_BRANCH \
+              __LIMON_GIT_CACHE_MARKS __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC \
+              __LIMON_STASH_CACHE
         _limon_invalidate_theme_cache
         LAST_EXIT_CODE=${LAST_EXIT_CODE:-0}
         limon_runner
@@ -1463,8 +1464,9 @@ _limon_restore_session() {
     unset __LIMON_CMD_START __LIMON_CMD_START_US __LIMON_CMD_ELAPSED \
           __LIMON_CMD_ELAPSED_MS __LIMON_TIMER_HIRES __LIMON_CMD_ACTIVE __LIMON_IN_PROMPT \
           __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
-          __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
-          __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
+          __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_IN_REPO __LIMON_GIT_CACHE_BRANCH \
+          __LIMON_GIT_CACHE_MARKS __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC \
+          __LIMON_STASH_CACHE
 }
 
 # Run the installer's uninstall flow, then clean up the live shell session.
@@ -1548,6 +1550,28 @@ _limon_git_op_state() {
     fi
 }
 
+# Fork-free check for whether $PWD is inside a git working tree (or is a bare
+# repo itself). git's own directory discovery is a walk up the filesystem for
+# a ".git" entry; doing that same walk in pure bash lets _limon_git_info skip
+# spawning "git status" entirely in the very common case of sitting in a
+# directory with no repo (a home directory, /tmp, /var, ...), where that fork
+# is pure overhead paid for nothing every single render. GIT_DIR/GIT_WORK_TREE
+# bypass git's directory discovery, so defer to a real git call whenever
+# either is set rather than risk a wrong "no repo" answer.
+_limon_git_has_repo_marker() {
+    [[ -n "${GIT_DIR:-}" || -n "${GIT_WORK_TREE:-}" ]] && return 0
+    # A bare repo's cwd has these three directly, with no ".git" entry, and
+    # git only auto-detects that at cwd itself, not in an ancestor.
+    [[ -f "$PWD/HEAD" && -d "$PWD/objects" && -d "$PWD/refs" ]] && return 0
+    local dir="$PWD"
+    while :; do
+        [[ -e "$dir/.git" ]] && return 0
+        [[ "$dir" == "/" ]] && return 1
+        dir="${dir%/*}"
+        [[ -z "$dir" ]] && dir="/"
+    done
+}
+
 # Sets __LIMON_STASH_COUNT to the number of stash entries.
 #
 # The stash is a reflog, so its entries can be counted by reading the log file
@@ -1622,7 +1646,19 @@ _limon_git_info() {
         __LIMON_GIT_BRANCH="$__LIMON_GIT_CACHE_BRANCH"
         __LIMON_GIT_MARKS="$__LIMON_GIT_CACHE_MARKS"
         __LIMON_GIT_DETACHED="${__LIMON_GIT_CACHE_DETACHED:-0}"
-        __LIMON_GIT_IN_REPO=1
+        __LIMON_GIT_IN_REPO="${__LIMON_GIT_CACHE_IN_REPO:-1}"
+        return
+    fi
+
+    if ! _limon_git_has_repo_marker; then
+        __LIMON_GIT_CACHE_PWD="$PWD"
+        __LIMON_GIT_CACHE_SEC=$SECONDS
+        __LIMON_GIT_CACHE_ASCII="${LIMON_ASCII:-0}"
+        __LIMON_GIT_CACHE_MODE="${LIMON_GIT_MODE:-full}"
+        __LIMON_GIT_CACHE_IN_REPO=0
+        __LIMON_GIT_CACHE_BRANCH=""
+        __LIMON_GIT_CACHE_MARKS=""
+        __LIMON_GIT_CACHE_DETACHED=0
         return
     fi
 
@@ -1695,13 +1731,23 @@ _limon_git_info() {
         __LIMON_GIT_CACHE_SEC=$SECONDS
         __LIMON_GIT_CACHE_ASCII="${LIMON_ASCII:-0}"
         __LIMON_GIT_CACHE_MODE="${LIMON_GIT_MODE:-full}"
+        __LIMON_GIT_CACHE_IN_REPO=1
         __LIMON_GIT_CACHE_BRANCH="$__LIMON_GIT_BRANCH"
         __LIMON_GIT_CACHE_MARKS="$__LIMON_GIT_MARKS"
         __LIMON_GIT_CACHE_DETACHED="${__LIMON_GIT_DETACHED:-0}"
     else
-        unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
-              __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
-              __LIMON_GIT_CACHE_DETACHED
+        # _limon_git_has_repo_marker found a ".git" entry (or bare-repo
+        # markers) but git itself disagrees, e.g. a stray/corrupt ".git"
+        # file. Cache the negative result too, so a broken marker doesn't
+        # force a fork on every render either.
+        __LIMON_GIT_CACHE_PWD="$PWD"
+        __LIMON_GIT_CACHE_SEC=$SECONDS
+        __LIMON_GIT_CACHE_ASCII="${LIMON_ASCII:-0}"
+        __LIMON_GIT_CACHE_MODE="${LIMON_GIT_MODE:-full}"
+        __LIMON_GIT_CACHE_IN_REPO=0
+        __LIMON_GIT_CACHE_BRANCH=""
+        __LIMON_GIT_CACHE_MARKS=""
+        __LIMON_GIT_CACHE_DETACHED=0
     fi
 }
 
@@ -2066,8 +2112,9 @@ case "$SUBCOMMAND" in
             unset __LIMON_RELOADING
         else
             unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
-                  __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
-                  __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
+                  __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_IN_REPO __LIMON_GIT_CACHE_BRANCH \
+                  __LIMON_GIT_CACHE_MARKS __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC \
+                  __LIMON_STASH_CACHE
             _limon_invalidate_theme_cache
             _limon_load_config
             # These stay shell variables rather than environment variables: the prompt
@@ -2334,7 +2381,8 @@ case "$SUBCOMMAND" in
                     source "$SCRIPT_DIR/limon.sh" on "$saved_theme"
                 elif _limon_is_active; then
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
-                          __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
+                          __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_IN_REPO \
+                          __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
                           __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
                     _limon_invalidate_theme_cache
                     limon_runner
