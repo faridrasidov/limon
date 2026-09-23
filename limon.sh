@@ -147,6 +147,8 @@ _limon_load_config() {
     LIMON_AUTOSUGGEST=1
     LIMON_AUTOSUGGEST_DELAY=100
     LIMON_AUTOSUGGEST_COLOR=auto
+    LIMON_HIGHLIGHT=0
+    LIMON_FZF=0
 
     if [[ -f "$LIMON_CONF" ]]; then
         read -r -a conf_parts < "$LIMON_CONF"
@@ -173,6 +175,8 @@ _limon_load_config() {
                 -autosuggest=*) LIMON_AUTOSUGGEST="${part#*=}" ;;
                 -autosuggest_delay=*) LIMON_AUTOSUGGEST_DELAY="${part#*=}" ;;
                 -autosuggest_color=*) LIMON_AUTOSUGGEST_COLOR="${part#*=}" ;;
+                -highlight=*) LIMON_HIGHLIGHT="${part#*=}" ;;
+                -fzf=*) LIMON_FZF="${part#*=}" ;;
                 -*) ;;
                 *) saved_theme="$part" ;;
             esac
@@ -217,6 +221,8 @@ _limon_conf_flags() {
     [[ "$LIMON_AUTOSUGGEST" != "1" ]] && flags+=("-autosuggest=$LIMON_AUTOSUGGEST")
     [[ "$LIMON_AUTOSUGGEST_DELAY" != "100" ]] && flags+=("-autosuggest_delay=$LIMON_AUTOSUGGEST_DELAY")
     [[ "$LIMON_AUTOSUGGEST_COLOR" != "auto" ]] && flags+=("-autosuggest_color=$LIMON_AUTOSUGGEST_COLOR")
+    [[ "$LIMON_HIGHLIGHT" != "0" ]] && flags+=("-highlight=$LIMON_HIGHLIGHT")
+    [[ "$LIMON_FZF" != "0" ]] && flags+=("-fzf=$LIMON_FZF")
     printf '%s\n' "${flags[@]}"
 }
 
@@ -352,9 +358,19 @@ _limon_ble_configure() {
     command -v ble-face >/dev/null 2>&1 || return 1
 
     _limon_ble_save_config
-    bleopt highlight_syntax= highlight_filename= highlight_variable= \
-        complete_ambiguous= complete_menu_complete= complete_menu_filter= \
+    bleopt complete_ambiguous= complete_menu_complete= complete_menu_filter= \
         prompt_eol_mark= exec_errexit_mark= >/dev/null 2>&1 || true
+
+    if [[ "${LIMON_HIGHLIGHT:-0}" == "1" ]]; then
+        # Already bundled in ble.sh; Limon only stops suppressing it. Any
+        # non-empty value turns each on, so ble.sh's own default coloring
+        # applies rather than Limon picking one.
+        bleopt highlight_syntax=1 highlight_filename=1 highlight_variable=1 \
+            >/dev/null 2>&1 || true
+    else
+        bleopt highlight_syntax= highlight_filename= highlight_variable= \
+            >/dev/null 2>&1 || true
+    fi
 
     if [[ "${LIMON_AUTOSUGGEST:-1}" == "1" ]]; then
         bleopt complete_auto_complete=1 complete_auto_history=1 \
@@ -377,6 +393,21 @@ _limon_ble_configure() {
                 ble-bind -m "$keymap" -f "$key" kill-backward-cword >/dev/null 2>&1 || true
             done
         done
+    fi
+
+    # Opt-in fzf key bindings (Ctrl+R history, Ctrl+T file, Alt+C cd), sourced
+    # from ble.sh's own vendored integration script. Skipped entirely unless
+    # both the flag is on and fzf is actually installed, so it costs nothing
+    # for anyone who has not asked for it. Sourcing is idempotent (it only
+    # calls ble-bind), so re-running "limon on" or toggling the flag back on
+    # is safe; __LIMON_FZF_LOADED just avoids redoing it every time.
+    if [[ "${LIMON_FZF:-0}" == "1" && "${__LIMON_FZF_LOADED:-0}" != "1" ]] &&
+       command -v fzf >/dev/null 2>&1; then
+        local fzf_bindings="$SCRIPT_DIR/vendor/blesh/contrib/integration/fzf-key-bindings.bash"
+        if [[ -r "$fzf_bindings" ]]; then
+            # shellcheck source=vendor/blesh/contrib/integration/fzf-key-bindings.bash
+            source "$fzf_bindings" && __LIMON_FZF_LOADED=1
+        fi
     fi
 
     blehook PREEXEC!=_limon_preexec
@@ -2147,6 +2178,7 @@ case "$SUBCOMMAND" in
         echo "Options: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
         echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK metrics=$LIMON_METRICS"
         echo "Autosuggest: enabled=$LIMON_AUTOSUGGEST delay=${LIMON_AUTOSUGGEST_DELAY}ms color=$LIMON_AUTOSUGGEST_COLOR provider=${__LIMON_EDITOR_PROVIDER:-inactive}"
+        echo "Editor extras: highlight=$LIMON_HIGHLIGHT fzf=$LIMON_FZF (both off by default, ble.sh only)"
         echo "Hooks: ${__LIMON_HOOK_PROVIDER:-none}; bash-completion=$(_limon_bash_completion_state)"
         if [[ "$LIMON_METRICS" == "1" && -n "${__LIMON_RENDER_US:-}" ]]; then
             echo "Last render: $(_limon_fmt_ms "$__LIMON_RENDER_US") (run 'limon bench' for an average)"
@@ -2212,7 +2244,7 @@ case "$SUBCOMMAND" in
     config)
         CONFIG_ARG="${1:-}"
         if [[ -z "$CONFIG_ARG" ]]; then
-            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|channel=stable|beta|dev|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1|show_exit=0|1|exit_hints=0|1|clock=0|1|metrics=0|1|autosuggest=0|1|autosuggest_delay=0..2000|autosuggest_color=auto|0..255"
+            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|channel=stable|beta|dev|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1|show_exit=0|1|exit_hints=0|1|clock=0|1|metrics=0|1|autosuggest=0|1|autosuggest_delay=0..2000|autosuggest_color=auto|0..255|highlight=0|1|fzf=0|1"
             echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE channel=$LIMON_CHANNEL ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
             echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK metrics=$LIMON_METRICS"
             echo "         autosuggest=$LIMON_AUTOSUGGEST autosuggest_delay=$LIMON_AUTOSUGGEST_DELAY autosuggest_color=$LIMON_AUTOSUGGEST_COLOR"
@@ -2365,9 +2397,21 @@ case "$SUBCOMMAND" in
                             ;;
                     esac
                     ;;
+                highlight=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_HIGHLIGHT="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: highlight must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
+                fzf=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_FZF="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: fzf must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
                 *)
                     echo "limon: unknown config option '$CONFIG_ARG'" >&2
-                    echo "Usage: limon config ... host_color=auto|off|N env_banner=0|1 show_root=0|1 show_sudo=0|1 k8s=0|1 cloud=0|1" >&2
+                    echo "Usage: limon config ... host_color=auto|off|N env_banner=0|1 show_root=0|1 show_sudo=0|1 k8s=0|1 cloud=0|1 highlight=0|1 fzf=0|1" >&2
                     ;;
             esac
             if [[ "$config_ok" -eq 1 ]]; then
@@ -2377,9 +2421,10 @@ case "$SUBCOMMAND" in
                 # renderer runs in this shell via PROMPT_COMMAND, and subshells inherit
                 # shell variables anyway, so exporting them only pollutes the environment
                 # of every child process.
-                if _limon_is_active && [[ "$CONFIG_ARG" == autosuggest* ]]; then
-                    # Re-run provider selection so autosuggestion changes take
-                    # effect immediately. A loaded bundled editor stays resident.
+                if _limon_is_active && [[ "$CONFIG_ARG" == autosuggest* || "$CONFIG_ARG" == highlight=* || "$CONFIG_ARG" == fzf=* ]]; then
+                    # Re-run provider selection so autosuggestion, syntax
+                    # highlighting, and fzf key-binding changes take effect
+                    # immediately. A loaded bundled editor stays resident.
                     # shellcheck source=limon.sh
                     source "$SCRIPT_DIR/limon.sh" on "$saved_theme"
                 elif _limon_is_active; then
@@ -2482,6 +2527,15 @@ Ghost autosuggestions:
     limon config autosuggest_delay=100  Delay in milliseconds (0-2000)
     limon config autosuggest_color=245  Ghost text color (auto or 0-255)
     Right/End accepts all; Ctrl+Right accepts one word; Tab completes normally
+
+Editor extras (bundled in ble.sh, off by default, zero cost unless enabled):
+    limon config highlight=1        Color commands as you type (valid/invalid/strings)
+    limon config fzf=1              fzf key bindings: Ctrl+R history, Ctrl+T file, Alt+C cd
+                                     (needs fzf installed; no-op otherwise)
+    highlight=1 and fzf=1 apply immediately in the current shell. Turning
+    fzf=0 back off does not unbind keys already bound in this shell (ble.sh
+    has no silent unbind, same limitation as 'limon off'); open a new shell
+    to fully clear them.
 
 Diagnostics:
     limon health                    Check bash, colors, git, theme, and prompt state

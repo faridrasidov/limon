@@ -209,6 +209,8 @@ limon config k8s=1      # Show kubectl context (cached 2s)
 limon config autosuggest=0 # Disable ghost autosuggestions (enabled by default)
 limon config autosuggest_delay=150 # Delay before suggestions, in ms (0-2000)
 limon config autosuggest_color=245 # Ghost text color: auto or 0-255
+limon config highlight=1 # Color commands as you type (off by default, ble.sh only)
+limon config fzf=1      # fzf key bindings: Ctrl+R, Ctrl+T, Alt+C (off by default, needs fzf)
 export LIMON_ENV=prod   # Label this shell as production (use with env_banner=1)
 ```
 
