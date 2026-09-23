@@ -11,6 +11,16 @@ The format follows a simple, release-oriented structure:
 
 ## 1.2.2 - 2026-09-22
 
+### Added
+
+- Two opt-in, ble.sh-only editor extras, both off by default and zero cost
+  unless enabled: `limon config highlight=1` turns on ble.sh's already-bundled
+  syntax highlighting (colors commands as you type), and `limon config fzf=1`
+  sources ble.sh's vendored fzf key bindings (Ctrl+R history, Ctrl+T file,
+  Alt+C cd) when `fzf` is installed. Both apply immediately in the current
+  shell; ble.sh has no silent unbind, so turning `fzf` back off needs a new
+  shell to fully clear its keys (the same limitation `limon off` already has).
+
 ### Changed
 
 - The git segment no longer forks `git` at all in a directory that is not a

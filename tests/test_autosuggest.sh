@@ -101,4 +101,63 @@ _limon_ble_restore
 it "leaves a bundled editor resident but inert when Limon turns off"
 assert_eq "::" "$bleopt_complete_auto_complete:$bleopt_highlight_syntax:$bleopt_prompt_eol_mark"
 
+# --- opt-in editor extras: highlight and fzf (off by default) ---
+
+LIMON_HIGHLIGHT=0
+LIMON_FZF=0
+_limon_ble_configure
+
+it "leaves syntax highlighting off by default"
+assert_eq "::" "$bleopt_highlight_syntax:$bleopt_highlight_filename:$bleopt_highlight_variable"
+
+LIMON_HIGHLIGHT=1
+_limon_ble_configure
+
+it "turns on syntax highlighting when highlight=1"
+assert_eq "1:1:1" "$bleopt_highlight_syntax:$bleopt_highlight_filename:$bleopt_highlight_variable"
+
+LIMON_HIGHLIGHT=0
+_limon_ble_configure
+
+it "turns syntax highlighting back off when highlight=0"
+assert_eq "::" "$bleopt_highlight_syntax:$bleopt_highlight_filename:$bleopt_highlight_variable"
+
+_LIMON_T_SAVED_PATH="$PATH"
+_LIMON_T_SAVED_SCRIPT_DIR="$SCRIPT_DIR"
+
+PATH="/nonexistent"
+LIMON_FZF=1
+unset __LIMON_FZF_LOADED
+_limon_ble_configure
+it "never attempts fzf key bindings when fzf is not installed"
+assert_eq "0" "${__LIMON_FZF_LOADED:-0}"
+
+PATH="$_LIMON_T_SAVED_PATH"
+fzf_home="$HOME/fake-fzf-vendor"
+mkdir -p "$fzf_home/bin" "$fzf_home/vendor/blesh/contrib/integration"
+printf '#!/usr/bin/env bash\ntrue\n' > "$fzf_home/bin/fzf"
+chmod +x "$fzf_home/bin/fzf"
+# A trivial stand-in for the real ble.sh contrib script: proves Limon sources
+# *a* file at the right path, without needing the real script's ble.sh
+# internals (ble-import, ble/function#push, ...) stubbed out too.
+echo '__LIMON_TEST_FZF_SOURCED=1' > \
+    "$fzf_home/vendor/blesh/contrib/integration/fzf-key-bindings.bash"
+
+PATH="$fzf_home/bin:$_LIMON_T_SAVED_PATH"
+SCRIPT_DIR="$fzf_home"
+LIMON_FZF=1
+unset __LIMON_FZF_LOADED __LIMON_TEST_FZF_SOURCED
+_limon_ble_configure
+it "sources the vendored fzf integration script when fzf=1 and fzf is on PATH"
+assert_eq "1" "${__LIMON_FZF_LOADED:-0}"
+assert_eq "1" "${__LIMON_TEST_FZF_SOURCED:-0}"
+
+__LIMON_TEST_FZF_SOURCED=0
+_limon_ble_configure
+it "does not re-source fzf bindings once already loaded"
+assert_eq "0" "$__LIMON_TEST_FZF_SOURCED"
+
+PATH="$_LIMON_T_SAVED_PATH"
+SCRIPT_DIR="$_LIMON_T_SAVED_SCRIPT_DIR"
+
 finish

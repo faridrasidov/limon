@@ -30,6 +30,9 @@ assert_eq "full" "$LIMON_GIT_MODE"
 it "enables ghost autosuggestions by default"
 assert_eq "1:100:auto" "$LIMON_AUTOSUGGEST:$LIMON_AUTOSUGGEST_DELAY:$LIMON_AUTOSUGGEST_COLOR"
 
+it "disables syntax highlighting and fzf key bindings by default"
+assert_eq "0:0" "$LIMON_HIGHLIGHT:$LIMON_FZF"
+
 it "emits no flags when every option is at its default"
 assert_eq "" "$(_limon_conf_flags)"
 
@@ -41,6 +44,8 @@ LIMON_MAX_PATH="40"
 LIMON_HOST_COLOR="auto"
 LIMON_AUTOSUGGEST_DELAY="250"
 LIMON_AUTOSUGGEST_COLOR="244"
+LIMON_HIGHLIGHT="1"
+LIMON_FZF="1"
 mapfile -t flags < <(_limon_conf_flags)
 _limon_write_config "nord" "${flags[@]}"
 
@@ -62,11 +67,15 @@ it "round-trips host_color"
 assert_eq "auto" "$LIMON_HOST_COLOR"
 it "round-trips autosuggestion settings"
 assert_eq "250:244" "$LIMON_AUTOSUGGEST_DELAY:$LIMON_AUTOSUGGEST_COLOR"
+it "round-trips highlight and fzf"
+assert_eq "1:1" "$LIMON_HIGHLIGHT:$LIMON_FZF"
 
 it "resets options absent from the config back to defaults"
 _limon_write_config "default"
 _limon_load_config
 assert_eq "full" "$LIMON_GIT_MODE"
+it "resets highlight and fzf back to defaults too"
+assert_eq "0:0" "$LIMON_HIGHLIGHT:$LIMON_FZF"
 
 # --- validation of enumerated options ---
 
@@ -78,6 +87,7 @@ for pair in git=full git=lite git=verbose git=off \
             show_host=0 show_host=1 show_ssh=0 show_ssh=1 \
             autosuggest=0 autosuggest=1 autosuggest_delay=0 autosuggest_delay=2000 \
             autosuggest_color=auto autosuggest_color=245 \
+            highlight=0 highlight=1 fzf=0 fzf=1 \
             host_color=auto host_color=off host_color=120 \
             max_path=0 max_path=40; do
     it "accepts '$pair'"
@@ -89,7 +99,8 @@ for pair in git=bogus autoupdate=maybe channel=nightly ascii=2 \
             max_path=-1 max_path=abc host_color=999 host_color=purple \
             env_banner=2 show_root=yes show_host=yes show_ssh=2 metrics=on \
             autosuggest=yes autosuggest_delay=-1 autosuggest_delay=2001 \
-            autosuggest_color=purple autosuggest_color=256; do
+            autosuggest_color=purple autosuggest_color=256 \
+            highlight=2 highlight=yes fzf=2 fzf=yes; do
     it "rejects '$pair'"
     out="$(limon_cmd config "$pair")"
     assert_contains "$out" "limon:"
