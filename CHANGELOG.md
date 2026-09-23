@@ -9,7 +9,7 @@ The format follows a simple, release-oriented structure:
 - `Fixed` for bug fixes.
 - `Docs` for documentation-only changes.
 
-## 1.2.2 - 2026-09-22
+## 1.3.0 - 2026-09-23
 
 ### Added
 
