@@ -2,7 +2,10 @@
 # Autosuggestion configuration, vendoring, and ble.sh integration helpers.
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# shellcheck disable=SC2034,SC2088,SC2154
+# SC2123: the fzf tests below deliberately shadow PATH, restoring it after,
+# to prove _limon_ble_configure's "command -v fzf" check both fails and
+# succeeds correctly.
+# shellcheck disable=SC2034,SC2088,SC2154,SC2123
 source "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/helpers.sh"
 use_temp_home
 load_limon
