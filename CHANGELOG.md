@@ -39,12 +39,6 @@ The format follows a simple, release-oriented structure:
   it to the remote's tracked branches, and reports a branch that is genuinely
   missing on the remote separately from a network failure.
 
-### Docs
-
-- Added `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1),
-  `SECURITY.md`, issue templates (bug, feature, theme) and a pull request
-  template, and linked them from the README.
-
 ## 1.3.0 - 2026-09-23
 
 ### Added
