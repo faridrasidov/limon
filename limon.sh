@@ -63,6 +63,8 @@ LIMON_ENV_BANNER=0
 LIMON_SHOW_ROOT=0
 LIMON_SHOW_SUDO=1
 LIMON_K8S=0
+LIMON_K8S_NS=0
+LIMON_K8S_DANGER=
 LIMON_CLOUD=0
 LIMON_SHOW_EXIT=0
 LIMON_EXIT_HINTS=0
@@ -139,6 +141,8 @@ _limon_load_config() {
     LIMON_SHOW_ROOT=0
     LIMON_SHOW_SUDO=1
     LIMON_K8S=0
+    LIMON_K8S_NS=0
+    LIMON_K8S_DANGER=
     LIMON_CLOUD=0
     LIMON_SHOW_EXIT=0
     LIMON_EXIT_HINTS=0
@@ -167,6 +171,8 @@ _limon_load_config() {
                 -show_root=*) LIMON_SHOW_ROOT="${part#*=}" ;;
                 -show_sudo=*) LIMON_SHOW_SUDO="${part#*=}" ;;
                 -k8s=*) LIMON_K8S="${part#*=}" ;;
+                -k8s_ns=*) LIMON_K8S_NS="${part#*=}" ;;
+                -k8s_danger=*) LIMON_K8S_DANGER="${part#*=}" ;;
                 -cloud=*) LIMON_CLOUD="${part#*=}" ;;
                 -show_exit=*) LIMON_SHOW_EXIT="${part#*=}" ;;
                 -exit_hints=*) LIMON_EXIT_HINTS="${part#*=}" ;;
@@ -213,6 +219,8 @@ _limon_conf_flags() {
     [[ "$LIMON_SHOW_ROOT" != "0" ]] && flags+=("-show_root=$LIMON_SHOW_ROOT")
     [[ "$LIMON_SHOW_SUDO" != "1" ]] && flags+=("-show_sudo=$LIMON_SHOW_SUDO")
     [[ "$LIMON_K8S" != "0" ]] && flags+=("-k8s=$LIMON_K8S")
+    [[ "$LIMON_K8S_NS" != "0" ]] && flags+=("-k8s_ns=$LIMON_K8S_NS")
+    [[ -n "$LIMON_K8S_DANGER" ]] && flags+=("-k8s_danger=$LIMON_K8S_DANGER")
     [[ "$LIMON_CLOUD" != "0" ]] && flags+=("-cloud=$LIMON_CLOUD")
     [[ "$LIMON_SHOW_EXIT" != "0" ]] && flags+=("-show_exit=$LIMON_SHOW_EXIT")
     [[ "$LIMON_EXIT_HINTS" != "0" ]] && flags+=("-exit_hints=$LIMON_EXIT_HINTS")
@@ -855,31 +863,179 @@ _limon_has_sudo_ticket() {
     return 1
 }
 
-# Sets __LIMON_K8S_LABEL to the kubectl context badge; returns 1 when there is
-# nothing to show.
+# Sets __LIMON_K8S_VAL to a kubeconfig scalar with surrounding whitespace and
+# quotes removed.
+_limon_k8s_scalar() {
+    local v="$1"
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    if [[ "$v" == \"*\" || "$v" == \'*\' ]]; then
+        v="${v:1:${#v}-2}"
+    fi
+    __LIMON_K8S_VAL="$v"
+}
+
+# Sets __LIMON_K8S_CTX and __LIMON_K8S_NS from the kubeconfig files in
+# $KUBECONFIG (or ~/.kube/config), read in pure bash so the prompt never forks
+# kubectl. Merging follows kubectl: the first file that sets current-context
+# wins, and the first file that defines a context supplies its namespace, which
+# falls back to "default". Handles the block-style YAML that kubectl, kind,
+# minikube, k3d and the cloud CLIs write. Returns 1 when no context is set and
+# 2 for a file in any other shape (JSON, flow-style YAML), so the caller can
+# fall back to kubectl.
+_limon_k8s_read_kubeconfig() {
+    __LIMON_K8S_CTX="" __LIMON_K8S_NS=""
+    local -a files
+    IFS=':' read -r -a files <<< "${KUBECONFIG:-$HOME/.kube/config}"
+
+    local -A ns_of=()
+    local -a lines
+    local file line trimmed indent kline kindent key current=""
+    local section dash_indent entry_indent in_ctx ctx_indent entry_name entry_ns seen_content
+    for file in "${files[@]}"; do
+        [[ -n "$file" && -f "$file" && -r "$file" ]] || continue
+        section="" dash_indent=-1 entry_indent=-1 in_ctx=0 ctx_indent=-1
+        entry_name="" entry_ns="" seen_content=0
+        # mapfile reads the whole file in one call, which is several times
+        # faster than a read loop.
+        mapfile -t lines < "$file"
+        for line in "${lines[@]}"; do
+            # Only contexts and top-level keys matter. Skipping everything else
+            # first keeps pattern work off the long inline certificate lines.
+            if [[ "$seen_content" == "1" && "$section" != "contexts" && "$line" == [[:space:]]* ]]; then
+                continue
+            fi
+            line="${line%$'\r'}"
+            trimmed="${line#"${line%%[![:space:]]*}"}"
+            [[ -z "$trimmed" || "$trimmed" == \#* ]] && continue
+            if [[ "$seen_content" == "0" ]]; then
+                seen_content=1
+                [[ "$trimmed" == "{"* ]] && return 2
+            fi
+            indent=$(( ${#line} - ${#trimmed} ))
+
+            # A top-level key ends any open context entry. kubectl writes list
+            # items at column 0 too, so a leading "- " is not a new section.
+            if (( indent == 0 )) && [[ "$trimmed" != "- "* ]]; then
+                if [[ -n "$entry_name" && -z "${ns_of[$entry_name]+x}" ]]; then
+                    ns_of[$entry_name]="${entry_ns:-default}"
+                fi
+                entry_name="" entry_ns="" in_ctx=0
+                section="${trimmed%%:*}"
+                case "$section" in
+                    current-context)
+                        _limon_k8s_scalar "${trimmed#*:}"
+                        [[ -z "$current" ]] && current="$__LIMON_K8S_VAL"
+                        ;;
+                    contexts)
+                        _limon_k8s_scalar "${trimmed#*:}"
+                        [[ -n "$__LIMON_K8S_VAL" && "$__LIMON_K8S_VAL" != "[]" ]] && return 2
+                        ;;
+                esac
+                continue
+            fi
+            [[ "$section" == "contexts" ]] || continue
+
+            kline="$trimmed" kindent="$indent"
+            if [[ "$trimmed" == "- "* ]] && (( dash_indent < 0 || indent == dash_indent )); then
+                if [[ -n "$entry_name" && -z "${ns_of[$entry_name]+x}" ]]; then
+                    ns_of[$entry_name]="${entry_ns:-default}"
+                fi
+                entry_name="" entry_ns="" in_ctx=0 ctx_indent=-1
+                dash_indent=$indent
+                entry_indent=$(( indent + 2 ))
+                kline="${trimmed#- }"
+                kline="${kline#"${kline%%[![:space:]]*}"}"
+                kindent=$entry_indent
+            fi
+            [[ "$kline" == *:* ]] || continue
+            key="${kline%%:*}"
+
+            if (( kindent == entry_indent )); then
+                in_ctx=0
+                case "$key" in
+                    name)
+                        _limon_k8s_scalar "${kline#*:}"
+                        entry_name="$__LIMON_K8S_VAL"
+                        ;;
+                    context)
+                        _limon_k8s_scalar "${kline#*:}"
+                        [[ -n "$__LIMON_K8S_VAL" ]] && return 2
+                        in_ctx=1 ctx_indent=-1
+                        ;;
+                esac
+            elif [[ "$in_ctx" == "1" ]] && (( kindent > entry_indent )); then
+                (( ctx_indent < 0 )) && ctx_indent=$kindent
+                if (( kindent == ctx_indent )) && [[ "$key" == "namespace" ]]; then
+                    _limon_k8s_scalar "${kline#*:}"
+                    entry_ns="$__LIMON_K8S_VAL"
+                fi
+            fi
+        done
+        if [[ -n "$entry_name" && -z "${ns_of[$entry_name]+x}" ]]; then
+            ns_of[$entry_name]="${entry_ns:-default}"
+        fi
+    done
+
+    [[ -n "$current" ]] || return 1
+    __LIMON_K8S_CTX="$current"
+    __LIMON_K8S_NS="${ns_of[$current]:-default}"
+}
+
+# Succeeds when context "$1" matches one of the comma-separated glob patterns
+# in k8s_danger, compared case-insensitively.
+_limon_k8s_is_danger() {
+    [[ -n "${LIMON_K8S_DANGER:-}" && -n "$1" ]] || return 1
+    local ctx="${1,,}" pat
+    local -a pats
+    IFS=',' read -r -a pats <<< "${LIMON_K8S_DANGER,,}"
+    for pat in "${pats[@]}"; do
+        # shellcheck disable=SC2053  # $pat is a glob on purpose
+        [[ -n "$pat" && "$ctx" == $pat ]] && return 0
+    done
+    return 1
+}
+
+# Sets __LIMON_K8S_LABEL to the kubectl context badge, with the namespace when
+# k8s_ns=1, and __LIMON_K8S_DANGER to 1 when the context matches k8s_danger;
+# returns 1 when there is nothing to show. The context is cached for 2s,
+# including "no context", so the kubectl fallback forks at most that often.
 _limon_k8s_label() {
-    __LIMON_K8S_LABEL=""
+    __LIMON_K8S_LABEL="" __LIMON_K8S_DANGER=0
     [[ "${LIMON_K8S:-0}" != "1" ]] && return 1
 
+    local ctx ns
     if [[ -n "${KUBE_PS1_CONTEXT:-}" ]]; then
-        __LIMON_K8S_LABEL="(k8s:$KUBE_PS1_CONTEXT)"
-        return 0
+        ctx="$KUBE_PS1_CONTEXT" ns="${KUBE_PS1_NAMESPACE:-}"
+    elif [[ -n "${__LIMON_K8S_CACHE_SEC:-}" ]] && (( SECONDS - __LIMON_K8S_CACHE_SEC < 2 )); then
+        ctx="${__LIMON_K8S_CACHE_CTX:-}" ns="${__LIMON_K8S_CACHE_NS:-}"
+    else
+        local rc=0
+        _limon_k8s_read_kubeconfig || rc=$?
+        ctx="$__LIMON_K8S_CTX" ns="$__LIMON_K8S_NS"
+        if [[ "$rc" == "2" ]] && command -v kubectl >/dev/null 2>&1; then
+            ctx="$(kubectl config current-context 2>/dev/null)" || ctx=""
+            ns=""
+            if [[ -n "$ctx" && "${LIMON_K8S_NS:-0}" == "1" ]]; then
+                ns="$(kubectl config view --minify -o 'jsonpath={..namespace}' 2>/dev/null)" || ns=""
+                ns="${ns:-default}"
+            fi
+        fi
+        __LIMON_K8S_CACHE_CTX="$ctx"
+        __LIMON_K8S_CACHE_NS="$ns"
+        __LIMON_K8S_CACHE_SEC=$SECONDS
     fi
+    [[ -n "$ctx" ]] || return 1
 
-    if [[ $((SECONDS - ${__LIMON_K8S_CACHE_SEC:-0})) -lt 2 && -n "${__LIMON_K8S_CACHE_CTX:-}" ]]; then
-        __LIMON_K8S_LABEL="(k8s:$__LIMON_K8S_CACHE_CTX)"
-        return 0
+    local body="k8s:$ctx"
+    if [[ "${LIMON_K8S_NS:-0}" == "1" && -n "$ns" ]]; then
+        body+="/$ns"
     fi
-
-    if ! command -v kubectl >/dev/null 2>&1; then
-        return 1
+    if _limon_k8s_is_danger "$ctx"; then
+        __LIMON_K8S_DANGER=1
+        body="${__LIMON_SYM_WARN:-!} $body"
     fi
-
-    local ctx
-    ctx="$(kubectl config current-context 2>/dev/null)" || return 1
-    __LIMON_K8S_CACHE_CTX="$ctx"
-    __LIMON_K8S_CACHE_SEC=$SECONDS
-    __LIMON_K8S_LABEL="(k8s:$ctx)"
+    __LIMON_K8S_LABEL="($body)"
 }
 
 # Sets __LIMON_SAFETY to the leading banner segment (root warning, environment
@@ -916,7 +1072,11 @@ _limon_safety_prefix() {
     fi
 
     if _limon_k8s_label 2>/dev/null && [[ -n "$__LIMON_K8S_LABEL" ]]; then
-        prefix+="${c_reset}${__LIMON_K8S_LABEL} "
+        if [[ "$__LIMON_K8S_DANGER" == "1" ]]; then
+            prefix+="${col_err}${__LIMON_K8S_LABEL}${c_reset} "
+        else
+            prefix+="${c_reset}${__LIMON_K8S_LABEL} "
+        fi
     fi
 
     __LIMON_SAFETY="$prefix"
@@ -2176,7 +2336,7 @@ case "$SUBCOMMAND" in
         fi
         echo "Config: $LIMON_CONF"
         echo "Options: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
-        echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK metrics=$LIMON_METRICS"
+        echo "Safety: host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S k8s_ns=$LIMON_K8S_NS k8s_danger=${LIMON_K8S_DANGER:-} cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK metrics=$LIMON_METRICS"
         echo "Autosuggest: enabled=$LIMON_AUTOSUGGEST delay=${LIMON_AUTOSUGGEST_DELAY}ms color=$LIMON_AUTOSUGGEST_COLOR provider=${__LIMON_EDITOR_PROVIDER:-inactive}"
         echo "Editor extras: highlight=$LIMON_HIGHLIGHT fzf=$LIMON_FZF (both off by default, ble.sh only)"
         echo "Hooks: ${__LIMON_HOOK_PROVIDER:-none}; bash-completion=$(_limon_bash_completion_state)"
@@ -2244,9 +2404,9 @@ case "$SUBCOMMAND" in
     config)
         CONFIG_ARG="${1:-}"
         if [[ -z "$CONFIG_ARG" ]]; then
-            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|channel=stable|beta|dev|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|cloud=0|1|show_exit=0|1|exit_hints=0|1|clock=0|1|metrics=0|1|autosuggest=0|1|autosuggest_delay=0..2000|autosuggest_color=auto|0..255|highlight=0|1|fzf=0|1"
+            echo "Usage: limon config timer_threshold=N|git=full|lite|off|show_host=0|1|show_ssh=0|1|autoupdate=off|notify|on|channel=stable|beta|dev|ascii=0|1|max_path=N|host_color=auto|off|N|env_banner=0|1|show_root=0|1|show_sudo=0|1|k8s=0|1|k8s_ns=0|1|k8s_danger=PATTERN[,PATTERN...]|cloud=0|1|show_exit=0|1|exit_hints=0|1|clock=0|1|metrics=0|1|autosuggest=0|1|autosuggest_delay=0..2000|autosuggest_color=auto|0..255|highlight=0|1|fzf=0|1"
             echo "Current: timer_threshold=$LIMON_TIMER_THRESHOLD git=$LIMON_GIT_MODE show_host=$LIMON_SHOW_HOST show_ssh=$LIMON_SHOW_SSH autoupdate=$LIMON_AUTOUPDATE channel=$LIMON_CHANNEL ascii=$LIMON_ASCII max_path=$LIMON_MAX_PATH"
-            echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK metrics=$LIMON_METRICS"
+            echo "         host_color=$LIMON_HOST_COLOR env_banner=$LIMON_ENV_BANNER show_root=$LIMON_SHOW_ROOT show_sudo=$LIMON_SHOW_SUDO k8s=$LIMON_K8S k8s_ns=$LIMON_K8S_NS k8s_danger=${LIMON_K8S_DANGER:-} cloud=$LIMON_CLOUD show_exit=$LIMON_SHOW_EXIT exit_hints=$LIMON_EXIT_HINTS clock=$LIMON_SHOW_CLOCK metrics=$LIMON_METRICS"
             echo "         autosuggest=$LIMON_AUTOSUGGEST autosuggest_delay=$LIMON_AUTOSUGGEST_DELAY autosuggest_color=$LIMON_AUTOSUGGEST_COLOR"
         else
             config_ok=0
@@ -2340,6 +2500,22 @@ case "$SUBCOMMAND" in
                         *) echo "limon: k8s must be 0 or 1" >&2 ;;
                     esac
                     ;;
+                k8s_ns=*)
+                    case "${CONFIG_ARG#*=}" in
+                        0|1) LIMON_K8S_NS="${CONFIG_ARG#*=}"; config_ok=1 ;;
+                        *) echo "limon: k8s_ns must be 0 or 1" >&2 ;;
+                    esac
+                    ;;
+                k8s_danger=*)
+                    # Comma-separated globs; empty turns the highlight off. The
+                    # config file is space-separated, so whitespace is rejected.
+                    if [[ "${CONFIG_ARG#*=}" =~ [[:space:]] ]]; then
+                        echo "limon: k8s_danger must be comma-separated context globs without spaces (e.g. '*prod*,*-prd')" >&2
+                    else
+                        LIMON_K8S_DANGER="${CONFIG_ARG#*=}"
+                        config_ok=1
+                    fi
+                    ;;
                 cloud=*)
                     case "${CONFIG_ARG#*=}" in
                         0|1) LIMON_CLOUD="${CONFIG_ARG#*=}"; config_ok=1 ;;
@@ -2411,7 +2587,7 @@ case "$SUBCOMMAND" in
                     ;;
                 *)
                     echo "limon: unknown config option '$CONFIG_ARG'" >&2
-                    echo "Usage: limon config ... host_color=auto|off|N env_banner=0|1 show_root=0|1 show_sudo=0|1 k8s=0|1 cloud=0|1 highlight=0|1 fzf=0|1" >&2
+                    echo "Usage: limon config ... host_color=auto|off|N env_banner=0|1 show_root=0|1 show_sudo=0|1 k8s=0|1 k8s_ns=0|1 k8s_danger=PATTERNS cloud=0|1 highlight=0|1 fzf=0|1" >&2
                     ;;
             esac
             if [[ "$config_ok" -eq 1 ]]; then
@@ -2431,7 +2607,8 @@ case "$SUBCOMMAND" in
                     unset __LIMON_GIT_CACHE_PWD __LIMON_GIT_CACHE_SEC __LIMON_GIT_CACHE_ASCII \
                           __LIMON_GIT_CACHE_MODE __LIMON_GIT_CACHE_IN_REPO \
                           __LIMON_GIT_CACHE_BRANCH __LIMON_GIT_CACHE_MARKS \
-                          __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE
+                          __LIMON_GIT_CACHE_DETACHED __LIMON_STASH_CACHE_SEC __LIMON_STASH_CACHE \
+                          __LIMON_K8S_CACHE_SEC
                     _limon_invalidate_theme_cache
                     limon_runner
                 fi
