@@ -1,0 +1,90 @@
+name: Bug report
+description: Something in Limon is broken or behaves unexpectedly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Security problems should be reported privately; see the [security policy](https://github.com/faridrasidov/limon/security/policy).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Include the exact error message or a screenshot of the prompt.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. limon config ...
+        2. cd into ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Limon version
+      description: Output of `limon version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Update channel
+      options:
+        - stable
+        - beta
+        - dev
+        - not sure
+  - type: input
+    id: bash
+    attributes:
+      label: Bash version
+      description: Output of `bash --version | head -1`.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - WSL
+        - Git Bash on Windows
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal emulator
+      placeholder: e.g. GNOME Terminal, iTerm2, Windows Terminal, tmux
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install Limon?
+      options:
+        - get-limon.sh (curl one-liner)
+        - Release archive
+        - git clone + install.sh
+        - Manual
+  - type: textarea
+    id: health
+    attributes:
+      label: Output of `limon health`
+      render: shell
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Relevant parts of your ~/.bashrc, other prompt tools (starship, bash-it, ...), etc.

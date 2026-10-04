@@ -1,0 +1,23 @@
+name: Theme request or contribution
+description: Propose a new built-in theme or a fix to an existing one.
+labels: ["theme"]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Theme name
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Colors or inspiration
+      description: A palette, a link to the color scheme it is based on, or your `.theme` file.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Drag an image here if you have one.
