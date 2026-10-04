@@ -9,6 +9,36 @@ The format follows a simple, release-oriented structure:
 - `Fixed` for bug fixes.
 - `Docs` for documentation-only changes.
 
+## 1.4.0 - 2026-10-04
+
+### Added
+
+- `limon config k8s_ns=1` adds the current namespace to the Kubernetes badge,
+  e.g. `(k8s:kind-dev/default)`, matching what kube-ps1 shows. A context with
+  no namespace set shows `default`.
+- `limon config k8s_danger='*prod*,*-prd'` takes comma-separated,
+  case-insensitive globs and shows a red `⚠` badge (`!` with `ascii=1`)
+  whenever the current context matches one, so a production cluster stands
+  out the same way `LIMON_ENV=prod` does.
+
+### Changed
+
+- The `k8s=1` badge no longer forks `kubectl` to find the context. It reads
+  the files in `$KUBECONFIG` (or `~/.kube/config`) in pure bash, following
+  kubectl's merge rules, and only falls back to `kubectl` for a kubeconfig
+  written as JSON or flow-style YAML. The 2s cache now also covers "no
+  context", so the fallback forks at most once every 2 seconds. kube-ps1's
+  `KUBE_PS1_NAMESPACE` is used alongside `KUBE_PS1_CONTEXT` when it is set.
+
+### Fixed
+
+- `limon upgrade beta` / `limon upgrade dev` failed with "remote branch
+  'origin/dev' not found" on installs made by `get-limon.sh`. Its shallow
+  `--depth 1` clone only tracks `master`, so a plain fetch never brought in
+  other branches. Limon now fetches the channel's branch explicitly and adds
+  it to the remote's tracked branches, and reports a branch that is genuinely
+  missing on the remote separately from a network failure.
+
 ## 1.3.0 - 2026-09-23
 
 ### Added
