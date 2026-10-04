@@ -512,7 +512,7 @@ Each test file runs in its own Bash process with an isolated `HOME` and `XDG_CON
 Linting uses [ShellCheck](https://www.shellcheck.net/):
 
 ```shell
-shellcheck -S warning limon.sh install.sh hint-limon.sh tests/*.sh
+shellcheck -S warning limon.sh install.sh hint-limon.sh get-limon.sh tests/*.sh
 ```
 
 Both run automatically in CI on every push and pull request, across Bash 4.4, 5.0, 5.2, and 5.3. CI also uses a real pseudo-terminal to accept a rendered ghost suggestion.
@@ -546,6 +546,12 @@ The bundled ble.sh runtime is BSD-3-Clause licensed. See
 
 ### Contributions
 
-Ideas, bug reports, and new themes are always welcome! Feel free to open an issue or submit a Pull Request.
+Ideas, bug reports, and new themes are always welcome! Open an
+[issue](https://github.com/faridrasidov/limon/issues/new/choose) or submit a
+pull request against the `dev` branch.
+
+* [Contributing guide](CONTRIBUTING.md): branches, tests, and what a pull request needs
+* [Code of Conduct](CODE_OF_CONDUCT.md)
+* [Security policy](SECURITY.md): please report vulnerabilities privately
 
 **Peace ✌️**
