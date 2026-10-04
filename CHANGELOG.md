@@ -30,6 +30,15 @@ The format follows a simple, release-oriented structure:
   context", so the fallback forks at most once every 2 seconds. kube-ps1's
   `KUBE_PS1_NAMESPACE` is used alongside `KUBE_PS1_CONTEXT` when it is set.
 
+### Fixed
+
+- `limon upgrade beta` / `limon upgrade dev` failed with "remote branch
+  'origin/dev' not found" on installs made by `get-limon.sh`. Its shallow
+  `--depth 1` clone only tracks `master`, so a plain fetch never brought in
+  other branches. Limon now fetches the channel's branch explicitly and adds
+  it to the remote's tracked branches, and reports a branch that is genuinely
+  missing on the remote separately from a network failure.
+
 ## 1.3.0 - 2026-09-23
 
 ### Added

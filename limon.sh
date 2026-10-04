@@ -1366,6 +1366,22 @@ _limon_git_prepare_repo() {
     git -C "$SCRIPT_DIR" config core.fileMode false 2>/dev/null || true
 }
 
+# Fetch one branch into origin/<branch> by explicit refspec. get-limon.sh
+# installs with `git clone --depth 1 --branch master`, which implies
+# --single-branch: the default refspec then only covers master, so a plain
+# `git fetch origin` never creates origin/beta or origin/dev and switching
+# channels failed with "remote branch 'origin/dev' not found". Also register
+# the branch with the remote so later plain fetches keep tracking it.
+_limon_git_fetch_branch() {
+    local branch="$1"
+    git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet origin \
+        "+refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null || return 1
+    if ! git -C "$SCRIPT_DIR" config --get-all remote.origin.fetch 2>/dev/null |
+        grep -qE "^\+refs/heads/(\*|$branch):"; then
+        git -C "$SCRIPT_DIR" remote set-branches --add origin "$branch" 2>/dev/null || true
+    fi
+}
+
 # Map an update channel name to its git branch. Prints nothing for unknown names.
 #   stable -> master   (tested, recommended)
 #   beta   -> beta     (newest features, may be unstable)
@@ -1388,7 +1404,7 @@ _limon_background_update_check() {
     local branch
     branch="$(_limon_channel_branch "${LIMON_CHANNEL:-stable}")" || branch="master"
 
-    git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet origin 2>/dev/null || return 0
+    _limon_git_fetch_branch "$branch" || return 0
 
     local current_branch local_rev remote_rev
     current_branch="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 0
@@ -1499,8 +1515,17 @@ _limon_do_upgrade() {
     _limon_git_prepare_repo
 
     echo "limon: channel '$channel' (branch '$branch') — checking $SCRIPT_DIR ..."
-    if ! git -C "$SCRIPT_DIR" --no-optional-locks fetch --quiet origin 2>/dev/null; then
-        echo "limon: failed to fetch from 'origin'." >&2
+    if ! git -C "$SCRIPT_DIR" --no-optional-locks ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+        if git -C "$SCRIPT_DIR" --no-optional-locks ls-remote origin >/dev/null 2>&1; then
+            echo "limon: remote branch '$branch' does not exist on 'origin'." >&2
+        else
+            echo "limon: failed to reach 'origin'." >&2
+        fi
+        return 1
+    fi
+
+    if ! _limon_git_fetch_branch "$branch"; then
+        echo "limon: failed to fetch branch '$branch' from 'origin'." >&2
         return 1
     fi
 
